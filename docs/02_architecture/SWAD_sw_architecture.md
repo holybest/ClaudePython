@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 문서 ID | SWAD-ECL-001 |
-| 개정 | 0.2 (독립 검토 RV-03 결과 반영) |
+| 개정 | 0.3 (변경 요청 CR-01, CR-02, CR-03 반영) |
 | 입력 | SWRS-ECL-001 (BL-SWR-1.0) |
 | 목표 베이스라인 | BL-SWA-1.0 (게이트 G2) |
 | 상태 | **BL-SWA-1.0 확정** (2026-11-26 사용자 승인, RVW-ECL-002 RV-04) |
@@ -35,7 +35,7 @@ ISO 26262-6 아키텍처 설계 원칙(계층 구조, 크기·복잡도 제한, 
 |---|---|---|---|---|
 | SWC-01 | 도메인 모델 | `child_lock/core/model.py` | B | 열거형(출력, 상태, 유효성, `priority_reason`, `reason_code`, 알림), 불변 데이터 타입(스냅샷, 명령, 판정 입력, 판정 결과, 코어 상태) |
 | SWC-02 | 입력 검증 | `child_lock/core/validation.py` | B | 원시 입력(dict) → 검증된 스냅샷 + 키별 유효성. 형식·범위·enum·NaN/무한대 검사 |
-| SWC-03 | 우선순위 판정 | `child_lock/core/arbitration.py` | B | 순수 함수. 판정 입력(`EvalContext`) + 코어 상태 → 쪽별 출력, `priority_reason`, `reason_code`, 알림, 상태, 다음 코어 상태 |
+| SWC-03 | 우선순위 판정 | `child_lock/core/arbitration.py`(순서·결과 조립), `child_lock/core/rules.py`(규칙 1~9) | B | 순수 함수. 판정 입력(`EvalContext`) + 코어 상태 → 쪽별 출력, `priority_reason`, `reason_code`, 알림, 상태, 다음 코어 상태 |
 | SWC-04 | 컨트롤러 | `child_lock/core/controller.py` | B | 코어 상태 보관과 평가 순서 실행(검증 → 시각 검사·freshness → 명령 새 입력 판정 → 시동 OFF 초기화 → 판정 → 상태 교체) |
 | SWC-10 | 안전 런타임 | `child_lock/runtime/runtime.py` | B | 단조 시계, 평가 직렬화 잠금, 50 ms tick 스레드, 판정 결과 전달(콜백). 시계·스레드를 쓰는 유일한 ASIL B 요소 |
 | SWC-06 | 결정 이력 | `child_lock/app/event_log.py` | QM | 최근 100건 메모리 링 버퍼, `event_id` 부여, SWR-011 허용 필드만 보관 |
@@ -79,7 +79,7 @@ flowchart TB
     LOG --> MODEL
 ```
 
-점선 콜백은 런타임이 정의한 콜백 형식(`Callable[[Decision], None]`)으로 호출하며, 런타임은 이력 모듈을 import하지 않는다.
+점선 콜백은 런타임이 정의한 콜백 형식(`Callable[[Decision, bool], None]`, 두 번째 인자는 tick 평가 여부)으로 호출하며, 런타임은 이력 모듈을 import하지 않는다.
 
 ### 2.2 의존 규칙
 
@@ -116,10 +116,10 @@ classDiagram
     }
     class EvalContext {
       <<frozen>>
-      +snapshot: VehicleSnapshot | None
+      +snapshot: VehicleSnapshot
       +now_s: float
       +is_tick: bool
-      +fresh: bool
+      +validity: InputValidity
       +command_is_new: bool
     }
     class CoreState {
@@ -206,7 +206,7 @@ sequenceDiagram
 - 컨트롤러는 `CoreState.last_snapshot`을 다시 판정한다. freshness는 `round((now − last_snapshot.source_timestamp_s) × 1000) > 200`이면 STALE이다(DEF-04).
 - tick에서는 운전자 명령을 적용하지 않는다(`command_is_new = False`). 명령 관련 알림(`COMMAND_REJECTED`, `DRIVER_UNLOCK_REJECTED`, `UNLOCK_SUPPRESSED`)은 내지 않는다. 입력 상태 알림(`CRASH_PENDING`)은 마지막 스냅샷 기준으로 다시 낸다.
 - 첫 스냅샷 전 tick은 DEF-06에 따라 출력 좌·우 `RELEASE`, 상태 `OFF`, `priority_reason = NONE`, `reason_code = NO_CHANGE`, 모든 유효성 키 `INVALID`, 감시 없음으로 결과를 낸다.
-- tick 결과도 결정 이력에 기록한다(SWR-010). 이 때문에 이력 100건이 약 5초 분량의 tick으로 채워지는 문제는 변경 요청 CR-01로 다룬다(8장).
+- tick 결과는 좌·우 출력·상태·`reason_code` 중 하나라도 직전 평가와 다를 때만 결정 이력에 기록한다(SWR-010, CR-01). 판단은 결정 이력(SWC-06)이 한다.
 
 ### 3.3 평가 순서 (컨트롤러 내부)
 1. 입력 검증(스냅샷 평가) 또는 `last_snapshot` 재사용(tick 평가)
@@ -226,7 +226,7 @@ stateDiagram-v2
     SUPPRESSED --> OVERRIDE: 같은 쪽 해제 요청(새 입력), 요청 시각 − t0 ≤ 10,000 ms, DEGRADED 아님 / RELEASE
     SUPPRESSED --> SUPPRESSED: 해제 요청(새 입력), 요청 시각 − t0 > 10,000 ms / t0 갱신
     SUPPRESSED --> IDLE: 위험 FALSE / 시동 OFF / 충돌
-    OVERRIDE --> IDLE: 위험 FALSE / 시동 OFF / 충돌 / 센서 고장 / 안전 입력 이상
+    OVERRIDE --> IDLE: 위험 FALSE / 시동 OFF / 충돌 / 센서 고장 / 안전 입력 이상 / 그 쪽 잠금 명령(CR-03)
 ```
 
 요청 시각은 해당 스냅샷의 `source_timestamp_s`이다. FRESHNESS가 STALE이면 DEGRADED이므로 override 전이는 일어나지 않는다.
@@ -248,7 +248,7 @@ stateDiagram-v2
 
 | 함수 | 설명 |
 |---|---|
-| `SafetyRuntime(controller, clock, on_decision)` | `clock`은 `Callable[[], float]`(기본: 시작 시점 기준 `time.monotonic()` 초), `on_decision`은 판정 결과 콜백 |
+| `SafetyRuntime(controller, clock, on_decision)` | `clock`은 `Callable[[], float]`(기본: 시작 시점 기준 `time.monotonic()` 초), `on_decision`은 판정 결과 콜백 `(Decision, is_tick)` |
 | `evaluate_snapshot(raw) -> Decision` / `tick() -> Decision` | 잠금 아래에서 시계를 읽고 컨트롤러 호출, 콜백 호출 |
 | `now() -> float` | 런타임 시계 값(Web의 `source_timestamp_s` 채움용) |
 | `start()` / `stop()` | 50 ms tick 스레드 시작·정지. tick 중 예외는 잡아서 기록하고 루프를 계속한다 |
@@ -368,7 +368,9 @@ stateDiagram-v2
 
 | ID | 대상 | 내용 | 상태 |
 |---|---|---|---|
-| CR-01 | SWRS SWR-010 | tick 결과까지 모두 기록하면 50 ms마다 이벤트가 생겨 최근 100건이 약 5초 분량이 된다. 이력이 결정 추적에 쓸모가 없어진다. 제안: "스냅샷 평가 결과는 모두 기록하고, tick 결과는 출력·상태·`reason_code` 중 하나가 직전 판정과 다를 때만 기록한다." | 사용자 결정 대기. 결정 전까지 SWRS 원문(모두 기록)을 따른다 |
+| CR-01 | SWRS SWR-010 | tick 결과는 출력·상태·`reason_code`가 바뀔 때만 기록 | **반영** (2026-11-26 사용자 지시로 권장안 적용, SWRS 0.3) |
+| CR-02 | SWAD | SWDD 구체화(SWC-03 모듈 분할, `EvalContext` 필드) 반영 | **반영** (SWAD 0.3) |
+| CR-03 | SWRS SWR-006 | override 중 잠금 명령으로 override 종료 | **반영** (SWRS 0.3, 3.4 상태도) |
 
 ## 9. 개정 이력
 
@@ -376,3 +378,4 @@ stateDiagram-v2
 |---|---|---|
 | 0.1 | 2026-11-26 | 최초 작성 |
 | 0.2 | 2026-11-26 | 독립 검토 RV-03 반영: 안전 런타임 SWC-10(ASIL B) 신설, FRESHNESS 유효성 키 분리, `EvalContext`·`last_snapshot` 추가, tick 규칙·첫 스냅샷 전 동작, 의존 규칙 허용 목록화와 DEP-05·06 추가, 이벤트·요청 스키마와 시간 기준, 시각 역행 처리, 고장 모드 추가, CR-01 |
+| 0.3 | 2026-11-26 | CR-01(tick 기록 조건, 콜백 인자), CR-02(모듈 분할·`EvalContext`), CR-03(잠금 명령으로 override 종료) 반영 |

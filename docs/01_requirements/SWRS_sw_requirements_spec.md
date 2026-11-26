@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 문서 ID | SWRS-ECL-001 |
-| 개정 | 0.2 (독립 검토 RV-01 결과 반영) |
+| 개정 | 0.3 (변경 요청 CR-01, CR-03 반영) |
 | 대상 | 전자식 차일드락 제어 SW (PC/SIL 참조 구현) |
 | 입력 | OEM-SWR-001 Rev 1.0 (BL-OEM-1.0) |
 | 목표 베이스라인 | BL-SWR-1.0 (게이트 G1) |
@@ -59,7 +59,7 @@ OEM-SWR-001의 OEM 요구사항 13건(안전 4, 기능 7, 비기능 2), 외부 �
 | ID | ASIL | 요구사항 | 검증 기준 | 출처 |
 |---|---|---|---|---|
 | SWR-005 | B | SW는 IF-003이 형식상 유효하고 `rear_<side>_approach_risk`가 TRUE이면 해당 평가에 그 쪽 출력을 `LOCK`으로 해야 한다(이유 `APPROACH_RISK`). 위험이 TRUE인 동안 매 평가 `LOCK`을 유지한다. 단, SWR-006의 override가 활성인 쪽은 예외이다. 스냅샷이 지연(STALE)된 경우에도 TRUE이면 `LOCK` 방향으로만 적용한다. | 위험 TRUE 주입 평가에 해당 쪽 `LOCK` + `APPROACH_RISK`. 위험 유지 중 매 평가 `LOCK`. 지연 스냅샷의 TRUE도 `LOCK`. | OEM-SR-002, IF-003 |
-| SWR-006 | B | SW는 접근위험 TRUE인 쪽의 해제 요청(새 입력, DEF-09)을 억제해야 한다: 출력 `LOCK` 유지, 알림 `UNLOCK_SUPPRESSED`, 억제 시각 t0 = 해당 스냅샷의 `source_timestamp_s` 기록. 같은 쪽 해제 요청이 새 입력으로 다시 들어오고 그 요청 시각 − t0 ≤ 10,000 ms이면 명시적 override로 처리한다: 그 쪽 `RELEASE`, 이유 `APPROACH_OVERRIDE`. override는 그 쪽 위험이 FALSE가 될 때까지 유지되며(그동안 `RELEASE`, 상태 `OVERRIDE`), 위험 FALSE, 시동 OFF, 충돌 해제, 센서 고장, 안전 입력 이상 중 하나가 되면 끝난다. 요청 시각 − t0 > 10,000 ms이면 새 첫 요청으로 보고 다시 억제하며 t0를 갱신한다. 안전 입력 이상(DEGRADED) 중에는 override를 허용하지 않는다. [가정 A-07] | 첫 해제 요청 → `LOCK` + `UNLOCK_SUPPRESSED`. 재요청 경과 10,000 ms → override, 10,001 ms → 다시 억제. 같은 명령이 연속 스냅샷에 남아 있으면 override 아님. override 후 위험 TRUE 유지 → `RELEASE` 유지. 위험 FALSE → override 종료. 이후 위험 TRUE 재발생 → `LOCK`. 반대쪽 요청은 override 아님. | OEM-SR-002, OEM-FR-003, IF-004 |
+| SWR-006 | B | SW는 접근위험 TRUE인 쪽의 해제 요청(새 입력, DEF-09)을 억제해야 한다: 출력 `LOCK` 유지, 알림 `UNLOCK_SUPPRESSED`, 억제 시각 t0 = 해당 스냅샷의 `source_timestamp_s` 기록. 같은 쪽 해제 요청이 새 입력으로 다시 들어오고 그 요청 시각 − t0 ≤ 10,000 ms이면 명시적 override로 처리한다: 그 쪽 `RELEASE`, 이유 `APPROACH_OVERRIDE`. override는 그 쪽 위험이 FALSE가 될 때까지 유지되며(그동안 `RELEASE`, 상태 `OVERRIDE`), 위험 FALSE, 시동 OFF, 충돌 해제, 센서 고장, 안전 입력 이상, 그 쪽을 포함하는 운전자 잠금 명령(새 입력, CR-03) 중 하나가 되면 끝난다. 잠금 명령으로 끝나면 그 쪽은 `LOCK`(이유 `APPROACH_RISK`)이다. 요청 시각 − t0 > 10,000 ms이면 새 첫 요청으로 보고 다시 억제하며 t0를 갱신한다. 안전 입력 이상(DEGRADED) 중에는 override를 허용하지 않는다. [가정 A-07] | 첫 해제 요청 → `LOCK` + `UNLOCK_SUPPRESSED`. 재요청 경과 10,000 ms → override, 10,001 ms → 다시 억제. 같은 명령이 연속 스냅샷에 남아 있으면 override 아님. override 후 위험 TRUE 유지 → `RELEASE` 유지. 위험 FALSE → override 종료. override 중 그 쪽 잠금 명령 → override 종료, `LOCK`. 이후 위험 TRUE 재발생 → `LOCK`. 반대쪽 요청은 override 아님. | OEM-SR-002, OEM-FR-003, IF-004 |
 | SWR-009 | B | SW는 접근위험, ISOFIX, 운전자 명령의 영향을 해당 쪽 출력에만 적용하고 반대쪽 출력은 바꾸지 않아야 한다. | 좌측 위험만 TRUE일 때 우측 출력과 우측 명령 처리가 위험 FALSE일 때와 같다. ISOFIX, 명령도 같은 방식으로 확인. | OEM-SR-002, OEM-FR-001, OEM-FR-006 |
 
 ### 3.4 충돌 긴급해제
@@ -73,7 +73,7 @@ OEM-SWR-001의 OEM 요구사항 13건(안전 4, 기능 7, 비기능 2), 외부 �
 
 | ID | ASIL | 요구사항 | 검증 기준 | 출처 |
 |---|---|---|---|---|
-| SWR-010 | QM | SW는 모든 평가(스냅샷·tick) 결과를 결정 이벤트로 기록하고, 1부터 1씩 증가하는 `event_id`를 부여해야 한다. | 연속 N회 평가 후 이벤트의 `event_id`가 1..N으로 연속. | OEM-NFR-002 |
+| SWR-010 | QM | SW는 모든 스냅샷 평가 결과와, 좌·우 출력·상태·`reason_code` 중 하나라도 직전 평가 결과와 다른 tick 평가 결과를 결정 이벤트로 기록하고, 1부터 1씩 증가하는 `event_id`를 부여해야 한다. (CR-01) | 연속 N회 스냅샷 평가 후 `event_id`가 1..N으로 연속. 변화 없는 tick은 기록되지 않고, 변화 있는 tick(예: 입력 중단으로 `DEGRADED` 전환)은 기록된다. | OEM-NFR-002 |
 | SWR-011 | QM | 결정 이벤트는 허용 필드(`event_id`, `timestamp_s`, `lock_left`, `lock_right`, `state`, `priority_reason`, `reason_code`, `notices`)만 가져야 하며, 영상·음성·개인 식별자를 저장하지 않아야 한다. `timestamp_s`는 평가 시각 `now`이다. | 저장된 이벤트의 필드 집합이 허용 목록과 정확히 같다. | OEM-NFR-002, OEM 2장 프로젝트 제약 |
 | SWR-012 | QM | SW는 최근 100건의 결정 이벤트만 메모리에 보존하고(오래된 것부터 삭제), 조회 시 오래된 순으로 반환해야 한다. 파일·DB 같은 영속 저장을 하지 않아 프로세스 재기동 후 이력이 없어야 한다. | 101건 평가 후 조회 결과가 `event_id` 2..101 순서. 새 프로세스에서 조회 시 0건. 실행 중 파일 생성 없음. | OEM-NFR-002 |
 
@@ -214,3 +214,4 @@ OEM-SWR-001의 OEM 요구사항 13건(안전 4, 기능 7, 비기능 2), 외부 �
 |---|---|---|
 | 0.1 | 2026-11-26 | 최초 작성 (SWR-001~021) |
 | 0.2 | 2026-11-26 | 독립 검토 RV-01 결과 반영: 안전 입력 그룹 정의(DEF-08), 충돌 해제의 지연·무효 무관 적용, 입력 중단 감시(SWR-022), override 지속·종료 조건, 명령 1회성(DEF-09), 상태 결정 규칙(DEF-10), `priority_reason` 목록과 `notices` 분리, 처리 시간(SWR-023), 실행 환경(SWR-024), Web 화면(SWR-025), 입력 필드 제한(SWR-026), 시간 비교 ms 정수화 |
+| 0.3 | 2026-11-26 | 변경 요청 반영(사용자 지시: 승인 없이 권장안대로 진행): CR-01 SWR-010 tick 기록 조건, CR-03 SWR-006 override 중 잠금 명령으로 종료 |
