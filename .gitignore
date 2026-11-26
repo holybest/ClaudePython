@@ -1,6 +1,15 @@
-# 가상환경
+# 가상환경 (CI용 포함)
 .venv/
 .venv-*/
+.ci-venv*/
+
+# CI 산출물
+test-results-*.xml
+coverage-*.xml
+
+# 비밀 값 (Jenkins API 키 등은 사용자 환경 변수에만 둔다)
+.env
+*.env
 
 # Python 캐시·도구 산출물
 __pycache__/
