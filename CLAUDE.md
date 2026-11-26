@@ -72,14 +72,19 @@ python -m tools.quality_check src tools   # 주석률 20% 이상, 함수 순수 
 - `main` 반영은 PR로만 하고, 병합 방식은 **Squash merge**를 사용한다. 병합한 브랜치는 삭제한다.
 - **병합 조건**: 아래를 모두 만족해야 한다.
   1. 소스코드 품질 기준을 모두 충족
-  2. CI(Jenkins) 통과. CI 구성 전에는 위 "기본 명령"을 로컬에서 실행한 결과를 PR 본문에 첨부
+  2. CI(Jenkins) 통과: PR 브랜치의 `ClaudePython-CI` 최신 빌드가 SUCCESS (PR 본문에 빌드 번호 기록)
   3. 사용자의 리뷰 또는 병합 요청
 - Claude는 위 조건을 모두 만족하고 사용자가 병합을 요청한 경우에만 PR을 병합할 수 있다. 그 외에는 PR 생성·수정까지만 한다.
 
 ## CI
 
-- CI는 Jenkins를 사용한다. 서버는 172.16.7.121에 있다.
-- **현재 미구성 상태이다.** 목표는 저장소에 `Jenkinsfile`을 두고 PR마다 Ruff 검사, pytest(커버리지 100% 확인), 품질 기준 검사를 실행하는 것이다. 접속 URL(포트), Job 이름, 트리거 방식이 정해지면 이 절에 적는다.
+- CI는 Jenkins를 사용한다. 접속 주소는 `http://172.16.7.121`(이 개발 PC에서 Windows 서비스로 실행)이다.
+- **인증 정보는 git에 저장하지 않는다.** Windows 사용자 환경 변수 `JENKINS_URL`, `JENKINS_USER`, `JENKINS_API_TOKEN`에서 읽어 API 호출에 쓴다. 값을 파일·커밋·PR·로그에 쓰거나 출력하지 않는다.
+- Job: `ClaudePython-CI` (멀티브랜치 파이프라인). 저장소의 모든 브랜치를 5분마다 검사해 변경된 브랜치를 빌드한다. 파이프라인 정의는 저장소의 `Jenkinsfile`이다.
+  - 단계: 환경 준비(3.12·3.14 가상환경, `requirements-dev.txt`) → Ruff 검사·포맷 → 주석률·함수 길이 → 단위 시험 3.12 → 단위 시험 3.14 (각각 분기 커버리지 100%)
+  - 개발 도구 버전은 `requirements-dev.txt`로 고정한다. 도구를 추가하면 이 파일도 갱신한다.
+- 브랜치 빌드 결과 확인: `GET {JENKINS_URL}/job/ClaudePython-CI/job/<브랜치 이름, / 는 %252F>/lastBuild/api/json` (기본 인증: `JENKINS_USER` + `JENKINS_API_TOKEN`). 푸시 직후 바로 확인하려면 `POST {JENKINS_URL}/job/ClaudePython-CI/build`로 브랜치 검사를 시작한다.
+- 기존 Freestyle Job `ClaudePython`은 사용자가 만든 것으로, 수정하지 않는다.
 
 ## 기타
 
