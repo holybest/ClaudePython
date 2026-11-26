@@ -134,9 +134,15 @@ class SafetyRuntime:
     def _tick_loop(self) -> None:
         """!
         @brief 정지 요청 전까지 주기마다 tick을 실행한다. 예외가 나도 계속한다.
+
+        대기 시간을 고정하지 않고 다음 예정 시각까지 남은 시간만 기다린다. OS 대기 분해능
+        때문에 한 번 늦어지면 다음 대기가 짧아져 평균 주기가 tick_period_s로 유지된다(SWR-022).
+        크게 밀리면 예정 시각을 현재로 다시 잡아 tick이 몰리지 않게 한다.
         """
-        while not self._stop.wait(self._period):
+        next_at = time.monotonic() + self._period
+        while not self._stop.wait(max(0.0, next_at - time.monotonic())):
             try:
                 self.tick()
             except Exception:
                 self.tick_errors += 1
+            next_at = max(next_at + self._period, time.monotonic())
