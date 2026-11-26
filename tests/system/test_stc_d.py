@@ -171,11 +171,18 @@ class _Browser:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-gpu",
+            # Jenkins 서비스(LocalSystem, 세션 0)에서는 샌드박스를 만들지 못해
+            # 브라우저가 바로 종료된다. 로컬 시뮬레이터 페이지만 여는 시험 도구라 샌드박스를 끈다.
+            "--no-sandbox",
             "about:blank",
         ]
-        self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        log_path = profile / "browser-stderr.log"
+        with log_path.open("wb") as log:
+            self.proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=log)
         port_file = profile / "DevToolsActivePort"
-        assert _wait_for(port_file.exists, timeout=30), "브라우저 DevTools 포트를 얻지 못했습니다"
+        if not _wait_for(port_file.exists, timeout=30):
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-800:]
+            raise AssertionError(f"브라우저 DevTools 포트를 얻지 못했습니다. 브라우저 출력: {tail}")
         _wait_for(lambda: port_file.read_text().strip() != "", timeout=5)
         port = int(port_file.read_text().split()[0])
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
