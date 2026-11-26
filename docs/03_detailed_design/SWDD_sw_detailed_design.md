@@ -380,6 +380,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | `_parse_float(text)` | `float(text)`가 유한하지 않으면(`1e400` 등) `RequestError`, 아니면 그 값 (`json.loads(parse_float=...)`) | 검토 D-04 |
 | `parse_snapshot(body: bytes, now_s: float) -> dict[str, object]` | UTF-8 디코딩 실패·JSON 오류 → `RequestError`. 최상위가 dict가 아님 → `RequestError`. `SNAPSHOT_KEYS` 밖의 키 → `RequestError`. `command`가 dict이면 `COMMAND_KEYS` 밖의 키 → `RequestError`. `source_timestamp_s`가 없으면 `now_s`로 채움 | SWR-015, 026 |
 | `MAX_BODY_BYTES = 65536` | `Content-Length`가 없거나, 정수가 아니거나, 이를 넘으면 `RequestError` | – |
+| `DRAIN_LIMIT_BYTES = 1048576` | 모든 POST는 응답 전에 본문을 먼저 읽는다(`_take_body`). 64 KiB를 넘으면 1 MiB까지 읽고 버린 뒤 400. 읽지 않은 본문이 남으면 Windows에서 연결이 강제로 끊겨 클라이언트가 응답을 못 받는 결함이 구현 중 발견되어 추가(재현 시험: `test_error_responses_are_delivered_reliably_even_with_unread_bodies`) | 구현 시 발견 |
 
 큰 정수는 JSON 파싱을 통과하지만 코어의 `_as_float`가 무효로 판정한다(예외 없음).
 

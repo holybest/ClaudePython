@@ -96,6 +96,37 @@ def test_docstring_check_requires_return_when_annotation_is_not_none():
     assert quality_check.docstring_violations(source) == [(4, "f: @return 없음")]
 
 
+def test_docstring_check_does_not_require_return_for_noreturn_or_never():
+    source = _GOOD_MODULE + _src(
+        '''
+        from typing import Never, NoReturn
+        import typing
+
+
+        def a() -> NoReturn:
+            """!
+            @brief 항상 예외
+            """
+            raise ValueError
+
+
+        def b() -> Never:
+            """!
+            @brief 항상 예외
+            """
+            raise ValueError
+
+
+        def c() -> typing.NoReturn:
+            """!
+            @brief 항상 예외
+            """
+            raise ValueError
+        '''
+    )
+    assert quality_check.docstring_violations(source) == []
+
+
 def test_docstring_check_requires_return_for_unannotated_function_returning_value():
     source = _GOOD_MODULE + _src(
         '''

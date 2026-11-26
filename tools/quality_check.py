@@ -117,6 +117,9 @@ _MARKER_ATTRIBUTES = frozenset(
     {"pytest.mark.skip", "pytest.mark.skipif", "pytest.mark.xfail", "pytest.skip", "pytest.xfail"}
 )
 
+## 반환하지 않는 함수의 반환 주석 (@return 불필요)
+_NO_RETURN_TYPES = frozenset({"NoReturn", "Never", "typing.NoReturn", "typing.Never"})
+
 ## 함수 정의 노드 형식
 _FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -170,7 +173,8 @@ def _returns_value(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     @return 값을 반환하면 True
     """
     if func.returns is not None:
-        return not (isinstance(func.returns, ast.Constant) and func.returns.value is None)
+        none = isinstance(func.returns, ast.Constant) and func.returns.value is None
+        return not none and _dotted_name(func.returns) not in _NO_RETURN_TYPES
     pending = list(func.body)
     while pending:
         node = pending.pop()
