@@ -19,20 +19,23 @@ DecisionCallback = Callable[[Decision, bool], object]
 class MonotonicClock:
     """!
     @brief 생성 시점 기준 단조 증가 시계(초).
+
+    time.perf_counter()를 쓴다(단조 증가, 고분해능). time.monotonic()은 Windows에서
+    분해능이 15.6 ms라 ms 단위 판단(DEF-04, 200/201 ms 경계)을 할 수 없다.
     """
 
     def __init__(self) -> None:
         """!
         @brief 기준 시점을 기록한다.
         """
-        self._origin = time.monotonic()
+        self._origin = time.perf_counter()
 
     def __call__(self) -> float:
         """!
         @brief 현재 시각을 구한다.
         @return 기준 시점 이후 경과 초
         """
-        return time.monotonic() - self._origin
+        return time.perf_counter() - self._origin
 
 
 class SafetyRuntime:

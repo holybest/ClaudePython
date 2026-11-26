@@ -47,6 +47,20 @@ def _wait_until(cond, timeout: float = 2.0) -> bool:
 # ---------------------------------------------------------------- SWU-06 안전 런타임
 
 
+def test_monotonic_clock_resolution_is_finer_than_1ms():
+    # DEF-04(ms 반올림)와 200/201 ms 경계를 판단하려면 시계 분해능이 1 ms보다 촘촘해야 한다.
+    # 시스템 시험 STC-F-100/101에서 time.monotonic()의 15.6 ms 분해능이 드러나 추가.
+    clock = MonotonicClock()
+    steps = []
+    last = clock()
+    while len(steps) < 20:
+        now = clock()
+        if now != last:
+            steps.append(now - last)
+            last = now
+    assert min(steps) < 0.001
+
+
 def test_monotonic_clock_starts_near_zero_and_never_decreases():
     clock = MonotonicClock()
     a = clock()
@@ -185,6 +199,16 @@ def test_snapshot_decisions_are_always_recorded_with_sequential_ids():
     for i in range(3):
         log.record(_decision(t=float(i)), is_tick=False)
     assert [e.event_id for e in log.events()] == [1, 2, 3]
+
+
+def test_first_tick_with_initial_decision_is_not_recorded():
+    # 기동 시 판정(DEF-06)이 최초의 직전 결과이므로
+    # 첫 tick의 같은 판정은 기록하지 않는다 (SWR-010, 012).
+    # 시스템 시험 STC-F-080~084, 156, 158, NF-007에서 발견.
+    log = EventLog()
+    assert log.record(m.initial_decision(0.05), is_tick=True) is None
+    assert log.events() == ()
+    assert log.record(m.initial_decision(0.1), is_tick=False) is not None  # 스냅샷은 항상 기록
 
 
 def test_tick_decisions_are_recorded_only_when_output_state_or_reason_changes():

@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 문서 ID | SWRS-ECL-001 |
-| 개정 | 0.3 (변경 요청 CR-01, CR-03 반영) |
+| 개정 | 0.5 (CR-04: SWR-020 래치 초기화 조건) |
 | 대상 | 전자식 차일드락 제어 SW (PC/SIL 참조 구현) |
 | 입력 | OEM-SWR-001 Rev 1.0 (BL-OEM-1.0) |
 | 목표 베이스라인 | BL-SWR-1.0 (게이트 G1) |
@@ -132,7 +132,7 @@ OEM-SWR-001의 OEM 요구사항 13건(안전 4, 기능 7, 비기능 2), 외부 �
 
 | 순위 | 규칙 (활성 조건) | 결정하는 쪽과 출력 | `priority_reason` |
 |---|---|---|---|
-| 1 | 충돌 CONFIRMED 또는 래치 (IF-002 형식 유효) | 좌·우 `RELEASE` | `CRASH` |
+| 1 | 충돌 CONFIRMED(IF-002 형식 유효) 또는 래치(설정 후에는 IF-002 유효성과 무관, SWR-007) | 좌·우 `RELEASE` | `CRASH` |
 | 2 | 센서 고장 (IF-009 유효, `sensor_fault` TRUE) | 좌·우 직전 확정 출력 유지 | `SENSOR_FAULT` |
 | 3 | 접근위험 (IF-003 형식 유효, 해당 쪽 TRUE) | 해당 쪽 `LOCK` (override 활성 시 `RELEASE`) | `APPROACH_RISK` |
 | 4 | 안전 입력 이상 (DEF-08) | 남은 쪽 직전 확정 출력 유지 | `DEGRADED` |
@@ -149,7 +149,7 @@ OEM-SWR-001의 OEM 요구사항 13건(안전 4, 기능 7, 비기능 2), 외부 �
 
 | ID | ASIL | 요구사항 | 검증 기준 | 출처 |
 |---|---|---|---|---|
-| SWR-020 | QM | SW는 IF-009가 유효하고 `ignition_on = FALSE`이면 해당 평가에서 먼저 충돌 래치(SWR-007)와 override(SWR-006)를 초기화한 뒤 우선순위 판정을 수행해야 한다. 상위 규칙이 없으면 좌·우 출력은 `RELEASE`, 상태 `OFF`, 이유 `IGNITION_OFF`이다. 같은 스냅샷에 CONFIRMED가 있으면 래치가 다시 설정된다(순위 1). | FALSE 주입 첫 평가에 좌·우 `RELEASE` + `OFF` + `IGNITION_OFF`. 래치 상태에서 FALSE + NONE → `OFF`. FALSE + CONFIRMED → `EMERGENCY`, `RELEASE`. 이후 ON에서 래치 없음. | OEM-FR-007, IF-009 |
+| SWR-020 | QM | SW는 IF-009가 유효하고 `ignition_on = FALSE`이면 해당 평가에서 먼저 충돌 래치(SWR-007)와 override(SWR-006)를 초기화한 뒤 우선순위 판정을 수행해야 한다. 단, 같은 평가에 상위 규칙인 센서 고장(순위 2)이나 안전 입력 이상(순위 4)이 활성이면 시동 OFF 규칙(순위 5)이 효력이 없으므로 초기화하지 않는다(CR-04). 상위 규칙이 없으면 좌·우 출력은 `RELEASE`, 상태 `OFF`, 이유 `IGNITION_OFF`이다. 같은 스냅샷에 CONFIRMED가 있으면 래치가 다시 설정된다(순위 1). | FALSE 주입 첫 평가에 좌·우 `RELEASE` + `OFF` + `IGNITION_OFF`. 래치 상태에서 FALSE + NONE → `OFF`. FALSE + CONFIRMED → `EMERGENCY`, `RELEASE`. 래치 상태에서 FALSE + 센서 고장, 또는 지연(STALE) 스냅샷의 FALSE → 래치 유지(`EMERGENCY`). 이후 ON에서 래치 없음. | OEM-FR-007, IF-009 |
 
 ### 3.12 센서 고장
 
@@ -215,3 +215,5 @@ OEM-SWR-001의 OEM 요구사항 13건(안전 4, 기능 7, 비기능 2), 외부 �
 | 0.1 | 2026-11-26 | 최초 작성 (SWR-001~021) |
 | 0.2 | 2026-11-26 | 독립 검토 RV-01 결과 반영: 안전 입력 그룹 정의(DEF-08), 충돌 해제의 지연·무효 무관 적용, 입력 중단 감시(SWR-022), override 지속·종료 조건, 명령 1회성(DEF-09), 상태 결정 규칙(DEF-10), `priority_reason` 목록과 `notices` 분리, 처리 시간(SWR-023), 실행 환경(SWR-024), Web 화면(SWR-025), 입력 필드 제한(SWR-026), 시간 비교 ms 정수화 |
 | 0.3 | 2026-11-26 | 변경 요청 반영(사용자 지시: 승인 없이 권장안대로 진행): CR-01 SWR-010 tick 기록 조건, CR-03 SWR-006 override 중 잠금 명령으로 종료 |
+| 0.4 | 2026-11-26 | 시스템 시험 설계 검토 의견 반영: SWR-019 순위 1의 래치 조건 문구 명확화(설정 후 IF-002 유효성과 무관, SWR-007과 일치). 동작 변경 없음 |
+| 0.5 | 2026-11-26 | CR-04: SWR-020에 센서 고장·안전 입력 이상 중 시동 OFF는 래치를 초기화하지 않는다는 조건 추가. 상세 설계(SWDD 4.4, 독립 검토 D-08)에서 정한 동작을 요구사항에 반영하지 않은 추적성 누락을 시스템 시험(STC-F-150)에서 발견 |

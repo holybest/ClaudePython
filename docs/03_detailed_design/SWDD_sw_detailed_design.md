@@ -333,7 +333,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 
 | 요소 | 처리 | 근거 |
 |---|---|---|
-| `MonotonicClock` | 생성 시 `self._origin = time.monotonic()`. `__call__() -> float`: `time.monotonic() - self._origin` | SWAD 4.2, 6.1 |
+| `MonotonicClock` | 생성 시 `self._origin = time.perf_counter()`. `__call__() -> float`: `time.perf_counter() - self._origin`. `time.monotonic()`은 Windows 분해능이 15.6 ms라 200/201 ms 경계·ms 반올림(DEF-04)을 판단할 수 없어 교체(시스템 시험 STC-F-100/101에서 발견) | SWAD 4.2, 6.1 |
 | `SafetyRuntime.__init__(controller, clock, on_decision=None, tick_period_s=0.05)` | `threading.Lock`, `threading.Event`(정지), 스레드 핸들 `None`, `tick_errors = 0`, `callback_errors = 0` | – |
 | `evaluate_snapshot(raw) -> Decision` | `with self._lock: now = clock(); d = controller.evaluate_snapshot(raw, now); self._notify(d, False)`; `return d`. 컨트롤러 예외는 호출자에게 전달(코어 상태 변경 없음) | SWAD 3.1 |
 | `tick() -> Decision` | 위와 같고 `evaluate_tick(now)` 호출, `self._notify(d, True)` | SWR-022 |
@@ -349,7 +349,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | 요소 | 처리 | 근거 |
 |---|---|---|
 | `Event` (frozen) | `event_id: int`, `timestamp_s: float`, `lock_left`, `lock_right`, `state`, `priority_reason`, `reason_code`, `notices` | SWR-011 |
-| `EventLog.__init__(capacity=100)` | `collections.deque(maxlen=capacity)`, `_next_id = 1`, `_last_key = None`, `threading.Lock` | SWR-012 |
+| `EventLog.__init__(capacity=100)` | `collections.deque(maxlen=capacity)`, `_next_id = 1`, `_last_key = _key(initial_decision(0.0))`(기동 시 판정이 최초의 직전 결과, DEF-06. `None`으로 두면 기동 후 첫 tick이 기록되는 결함이 시스템 시험 STC-F-080~084, 156, 158, NF-007에서 발견), `threading.Lock` | SWR-010, 012 |
 | `_key(decision)` | `(lock_left, lock_right, state, reason_code)` | SWR-010 |
 | `record(decision, is_tick) -> Event \| None` | 잠금 아래에서: `key = _key(decision)`; `changed = key != _last_key`; `_last_key = key`. `is_tick`이고 `not changed`이면 `None` 반환(기록 안 함). 그 외 `Event` 생성(허용 필드만 복사), `_next_id += 1`, deque 추가(가득 차면 가장 오래된 것 자동 삭제) | SWR-010(CR-01), 012 |
 | `events() -> tuple[Event, ...]` | 잠금 아래에서 오래된 순 튜플 생성 | SWR-012, 검토 D-10 |
@@ -473,3 +473,4 @@ SWR 26건 모두 하나 이상의 함수로 추적된다(26/26).
 | 0.1 | 2026-11-26 | 최초 작성 |
 | 0.2 | 2026-11-26 | 독립 검토 RV-05 반영: 시간 차이 반올림(`diff_ms`), override 창 하한과 지연 시각 미기록, 명령 재입력 전제와 화면 동작, 큰 정수·무한대 처리, 서비스 `start/stop`, override 이유 의사코드, 모호성 해소, 시동 OFF 초기화 조건, SWAD 구체화 CR-02, 런타임 재시작·이력 잠금, 추적표 보완, CR-03 |
 | 0.3 | 2026-11-26 | CR-01(이력 `record` 기록 조건, 콜백 `is_tick`), CR-03(`update_guards` 잠금 명령 종료) 반영 |
+| 0.4 | 2026-11-26 | 시스템 시험 결함 반영: 런타임 시계를 `time.perf_counter`로 교체, 결정 이력 초기 비교 기준을 기동 시 판정으로 설정 |

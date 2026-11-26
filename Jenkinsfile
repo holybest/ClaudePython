@@ -4,7 +4,7 @@ pipeline {
     agent any
 
     options {
-        timeout(time: 20, unit: 'MINUTES')
+        timeout(time: 60, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '30'))
         disableConcurrentBuilds()
     }
@@ -49,6 +49,15 @@ pipeline {
         stage('단위 시험 Python 3.14') {
             steps {
                 bat '.ci-venv314\\Scripts\\python.exe -m pytest -p no:cacheprovider --cov --cov-branch --cov-report=term-missing --cov-report=xml:coverage-314.xml --cov-fail-under=100 --junitxml=test-results-314.xml'
+            }
+        }
+        stage('시스템 시험 (SWE.6, Python 3.12)') {
+            steps {
+                // 시뮬레이터를 별도 프로세스로 실행하는 시스템 테스트 케이스 (docs/06_system_test)
+                // STC-NF-002(서버 1,000회 재기동, 약 30분)는 CI에서 50회로 줄인다. 사양 값 실행 결과는 시스템 시험 보고서에 기록
+                withEnv(['STC_NF_002_RUNS=50']) {
+                    bat '.ci-venv312\\Scripts\\python.exe -m pytest tests/system -m system -p no:cacheprovider --junitxml=test-results-system.xml'
+                }
             }
         }
     }

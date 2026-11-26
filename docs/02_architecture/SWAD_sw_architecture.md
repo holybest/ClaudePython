@@ -248,7 +248,7 @@ stateDiagram-v2
 
 | 함수 | 설명 |
 |---|---|
-| `SafetyRuntime(controller, clock, on_decision)` | `clock`은 `Callable[[], float]`(기본: 시작 시점 기준 `time.monotonic()` 초), `on_decision`은 판정 결과 콜백 `(Decision, is_tick)` |
+| `SafetyRuntime(controller, clock, on_decision)` | `clock`은 `Callable[[], float]`(기본: 시작 시점 기준 `time.perf_counter()` 초. 단조 증가·고분해능. Windows의 `time.monotonic()`은 분해능 15.6 ms라 쓰지 않음), `on_decision`은 판정 결과 콜백 `(Decision, is_tick)` |
 | `evaluate_snapshot(raw) -> Decision` / `tick() -> Decision` | 잠금 아래에서 시계를 읽고 컨트롤러 호출, 콜백 호출 |
 | `now() -> float` | 런타임 시계 값(Web의 `source_timestamp_s` 채움용) |
 | `start()` / `stop()` | 50 ms tick 스레드 시작·정지. tick 중 예외는 잡아서 기록하고 루프를 계속한다 |
@@ -330,7 +330,7 @@ stateDiagram-v2
 | 시간(처리) | QM 처리가 평가를 지연 | 평가는 코어 안에서 10 ms 이하(SWR-023). 잠금 안의 QM 작업은 이력 콜백 1건(`deque.append`, 상수 시간)뿐이며 SWR-023 측정에 포함한다 |
 | 시간(스케줄) | HTTP 스레드가 tick을 지연(GIL, 잠금 경쟁) | HTTP 처리 중 잠금 보유는 평가 1회 분량뿐. 상태 조회 때도 tick 수행. 통합 시험에서 tick 간격 최대값을 측정(목표 ≤ 100 ms → 입력 중단 후 300 ms 이내 DEGRADED) |
 | 실행 순서 | 스냅샷과 tick 동시 평가 | 안전 런타임(ASIL B)의 잠금으로 직렬 실행. Web은 런타임을 직접 호출할 수 없음(DEP-05) |
-| 시계 | 시각 역행·점프 | 단조 시계(`time.monotonic`) 사용. 코어는 시각 역행을 STALE로 처리(3.3 2단계) |
+| 시계 | 시각 역행·점프, 분해능 부족 | 단조·고분해능 시계(`time.perf_counter`, 1 µs 미만) 사용. 코어는 시각 역행을 STALE로 처리(3.3 2단계) |
 | 예외 | QM 콜백이나 판정 중 예외 | 코어 상태 교체는 판정이 끝난 뒤 한 번에. 판정 중 예외 시 상태·출력 변경 없음, HTTP 500. 콜백 예외는 런타임이 잡아 기록하고 평가 결과는 그대로 반환. tick 스레드는 예외를 잡고 계속 실행 |
 
 ### 6.2 안전 분석 (ASIL B 컴포넌트 고장 모드)
@@ -379,3 +379,4 @@ stateDiagram-v2
 | 0.1 | 2026-11-26 | 최초 작성 |
 | 0.2 | 2026-11-26 | 독립 검토 RV-03 반영: 안전 런타임 SWC-10(ASIL B) 신설, FRESHNESS 유효성 키 분리, `EvalContext`·`last_snapshot` 추가, tick 규칙·첫 스냅샷 전 동작, 의존 규칙 허용 목록화와 DEP-05·06 추가, 이벤트·요청 스키마와 시간 기준, 시각 역행 처리, 고장 모드 추가, CR-01 |
 | 0.3 | 2026-11-26 | CR-01(tick 기록 조건, 콜백 인자), CR-02(모듈 분할·`EvalContext`), CR-03(잠금 명령으로 override 종료) 반영 |
+| 0.4 | 2026-11-26 | 시스템 시험 결함 반영: 런타임 시계를 `time.perf_counter`로 교체 |

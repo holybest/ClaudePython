@@ -9,7 +9,15 @@ import threading
 from collections import deque
 from dataclasses import dataclass
 
-from child_lock.core.model import Decision, LockOutput, Notice, PriorityReason, ReasonCode, State
+from child_lock.core.model import (
+    Decision,
+    LockOutput,
+    Notice,
+    PriorityReason,
+    ReasonCode,
+    State,
+    initial_decision,
+)
 
 ## 변화 판단 키 (좌, 우, 상태, reason_code)
 _Key = tuple[LockOutput, LockOutput, State, ReasonCode]
@@ -52,7 +60,8 @@ class EventLog:
         """
         self._events: deque[Event] = deque(maxlen=capacity)
         self._next_id = 1
-        self._last_key: _Key | None = None
+        # 기동 시 판정(DEF-06)이 최초의 직전 결과이다. 첫 tick의 같은 판정은 기록하지 않는다
+        self._last_key: _Key = _key(initial_decision(0.0))
         self._lock = threading.Lock()
 
     def record(self, decision: Decision, is_tick: bool) -> Event | None:
