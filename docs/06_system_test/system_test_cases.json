@@ -1,0 +1,4211 @@
+{
+ "project": "전자식 차일드락 제어 SW (PC/SIL 참조 구현)",
+ "basis_document": "SWRS_sw_requirements_spec.md (SWRS-ECL-001 개정 0.3, BL-SWR-1.0)",
+ "environment": "PC/SIL: python -m child_lock.web --port 8000 (Web 시뮬레이터). 입력 POST /api/snapshot, 관찰 GET /api/status, GET /api/events. HIL·실차·타깃 ECU는 범위 밖.\n표기 규약(모든 케이스 공통):\n- B0 = {vehicle_speed_kph:0.0, gear:\"P\", crash_status:\"NONE\", rear_left_approach_risk:false, rear_right_approach_risk:false, fire_detected:false, overtemperature_detected:false, adult_present:false, isofix_left:false, isofix_right:false, ignition_on:true, sensor_fault:false} (command와 source_timestamp_s는 생략). B0{k=v}는 해당 필드만 바꾼 스냅샷, B0{-k}는 필드 생략. N=B0{rear_left_approach_risk=true}.\n- cmd(side,action) = command {side, action, source:\"physical_button\"}.\n- S0: 시험 서버 신규 기동 후 B0 1회 전송, 응답 L=RELEASE, R=RELEASE, state=NORMAL 확인. S-LOCK: S0 후 B0{cmd(all,lock)} 전송(L=LOCK, R=LOCK), 이어서 B0 전송(명령 1회성 해제, LOCK 유지). S-MIX: S0 후 B0{isofix_left=true} 전송(L=LOCK, R=RELEASE), 이어서 B0 전송(L=LOCK, R=RELEASE 유지).\n- T = 직전 GET /api/status의 timestamp_s. 지연 스냅샷 = source_timestamp_s를 T-0.300으로 지정(지연 약 300 ms, STALE). floor_ms(x) = x를 ms 단위로 내림.\n- OV(override 설정): S0, N 전송, ts1=floor_ms(T), REQ1=N{cmd(left,unlock), source_timestamp_s=ts1} 전송, N 전송, REQ1(ts=ts1) 재전송을 150 ms 이내에 수행 -> L=RELEASE, R=RELEASE, state=OVERRIDE.\n- KA: 단계 사이 대기가 150 ms를 넘으면 직전 스냅샷에서 command를 뺀 것을 100 ms 이하 주기로 반복 전송(입력 중단으로 DEGRADED가 되는 것 방지). 별도 명시 없으면 단계 간격은 100 ms 이하. 시험은 스크립트(예: Python urllib)로 수행.\n- 예상 출력의 L/R는 lock_left/lock_right. notices는 집합으로 비교. 'age'는 응답 timestamp_s - source_timestamp_s.",
+ "test_basis": [
+  {
+   "id": "SWR-001",
+   "title": "운전자 명령(side/action/source) 선택 쪽 적용",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-002",
+   "title": "운전자 명령 필드 누락·형식 오류·미등록 값 거절",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-003",
+   "title": "차속 3.0 km/h 이상 자동 잠금",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-004",
+   "title": "운전자 해제 명령 허용 조건 (a)~(d)",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-005",
+   "title": "후측방 접근위험 TRUE 시 해당 쪽 LOCK",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-006",
+   "title": "접근위험 중 해제 요청 억제와 10,000 ms override",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-007",
+   "title": "충돌 CONFIRMED 긴급해제와 래치",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-008",
+   "title": "충돌 PENDING 처리(출력 불변, 알림)",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-009",
+   "title": "접근위험·ISOFIX·명령의 쪽별 독립",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-010",
+   "title": "결정 이벤트 기록과 event_id",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-011",
+   "title": "결정 이벤트 허용 필드와 개인정보 금지",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-012",
+   "title": "최근 100건 메모리 보존, 영속 저장 없음",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-013",
+   "title": "입력 그룹 검증, 200 ms 지연, DEGRADED",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-014",
+   "title": "상태 조회 결과 7개 필드와 이유 코드 매핑",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-015",
+   "title": "HTTP 인터페이스(200/400/500)",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-016",
+   "title": "결정론(초기 상태·입력·시계에만 의존)",
+   "category": "non-functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-017",
+   "title": "화재·과온·성인 탑승 강제 해제",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-018",
+   "title": "ISOFIX 강제 잠금",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-019",
+   "title": "우선순위 판정(순위 1~9)",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-020",
+   "title": "시동 OFF 처리와 래치·override 초기화",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-021",
+   "title": "센서 고장 시 직전 출력 유지, FAULT",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-022",
+   "title": "tick 평가와 입력 중단(200 ms) 감시",
+   "category": "functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-023",
+   "title": "1회 평가 처리 시간 10 ms 이하",
+   "category": "non-functional",
+   "asil": "ASIL B",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-024",
+   "title": "Python 3.12, 표준 라이브러리만 사용",
+   "category": "non-functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-025",
+   "title": "Web 시뮬레이터 화면(GET /)",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  },
+  {
+   "id": "SWR-026",
+   "title": "정의 외 입력 필드 400 거절",
+   "category": "functional",
+   "asil": "QM",
+   "testable": true,
+   "untestable_reason": ""
+  }
+ ],
+ "test_cases": [
+  {
+   "id": "STC-F-001",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "avn에서 온 right lock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S0: 좌·우 RELEASE 상태에서 시작",
+   "inputs": "B0{command={side:\"right\", action:\"lock\", source:\"avn\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S0 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-002",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "voice에서 온 all unlock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S-LOCK: 좌·우 LOCK 상태에서 시작",
+   "inputs": "B0{command={side:\"all\", action:\"unlock\", source:\"voice\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S-LOCK 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-003",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "mobile_app에서 온 all lock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S0: 좌·우 RELEASE 상태에서 시작",
+   "inputs": "B0{command={side:\"all\", action:\"lock\", source:\"mobile_app\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S0 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-004",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "avn에서 온 left unlock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S-LOCK: 좌·우 LOCK 상태에서 시작",
+   "inputs": "B0{command={side:\"left\", action:\"unlock\", source:\"avn\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S-LOCK 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-005",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "physical_button에서 온 all unlock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S-LOCK: 좌·우 LOCK 상태에서 시작",
+   "inputs": "B0{command={side:\"all\", action:\"unlock\", source:\"physical_button\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S-LOCK 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-006",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "mobile_app에서 온 right unlock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S-LOCK: 좌·우 LOCK 상태에서 시작",
+   "inputs": "B0{command={side:\"right\", action:\"unlock\", source:\"mobile_app\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S-LOCK 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-007",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "avn에서 온 all lock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S0: 좌·우 RELEASE 상태에서 시작",
+   "inputs": "B0{command={side:\"all\", action:\"lock\", source:\"avn\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S0 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-008",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "mobile_app에서 온 left lock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S0: 좌·우 RELEASE 상태에서 시작",
+   "inputs": "B0{command={side:\"left\", action:\"lock\", source:\"mobile_app\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S0 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-009",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "voice에서 온 left lock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S0: 좌·우 RELEASE 상태에서 시작",
+   "inputs": "B0{command={side:\"left\", action:\"lock\", source:\"voice\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S0 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-010",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "voice에서 온 right unlock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S-LOCK: 좌·우 LOCK 상태에서 시작",
+   "inputs": "B0{command={side:\"right\", action:\"unlock\", source:\"voice\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S-LOCK 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-011",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "physical_button에서 온 right lock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S0: 좌·우 RELEASE 상태에서 시작",
+   "inputs": "B0{command={side:\"right\", action:\"lock\", source:\"physical_button\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S0 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-012",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "physical_button에서 온 left unlock 명령이 선택된 쪽 출력에만 반영되고 반대쪽 출력은 변하지 않는지 확인(PICT 페어와이즈 행)",
+   "preconditions": "S-LOCK: 좌·우 LOCK 상태에서 시작",
+   "inputs": "B0{command={side:\"left\", action:\"unlock\", source:\"physical_button\"}} (차속 0.0 km/h, 나머지 B0와 동일)",
+   "procedure": "1. 사전조건 S-LOCK 수행\n2. 입력 스냅샷을 POST /api/snapshot으로 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "PICT 모델 'SWR-001 명령 조합' 결과 1행"
+  },
+  {
+   "id": "STC-F-013",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "명령 1회성(DEF-09): 같은 명령이 연속 스냅샷에 남아 있으면 재적용하지 않고, 명령 없는 스냅샷을 사이에 두면 새 입력으로 다시 적용하는지 확인",
+   "preconditions": "S0 수행(좌·우 RELEASE)",
+   "inputs": "C = command{side:\"left\", action:\"lock\", source:\"physical_button\"}",
+   "procedure": "1. B0{C} 전송\n2. B0{C, fire_detected=true} 전송 (C 연속)\n3. B0{C} 전송 (화재 해제, C 계속 남아 있음)\n4. B0 전송 (명령 없음)\n5. B0{C} 전송 (명령 재입력)",
+   "expected": "1) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]\n2) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]\n3) 명령이 새 입력이 아니므로 재적용 없음: lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n4) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n5) 새 입력으로 재적용: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "3단계가 핵심: 명령을 매 스냅샷 재적용하는 결함은 L=LOCK이 된다."
+  },
+  {
+   "id": "STC-F-014",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 side 누락일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={action:\"unlock\", source:\"physical_button\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "누락 값을 'left'/'all' 등으로 보정해 적용하면 L=RELEASE가 된다"
+  },
+  {
+   "id": "STC-F-015",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 side 문자열이 아닌 값(정수 1)일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:1, action:\"unlock\", source:\"physical_button\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "정수 1을 true/인덱스로 해석하는 결함 검출"
+  },
+  {
+   "id": "STC-F-016",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 side 미등록 값('center')일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"center\", action:\"unlock\", source:\"physical_button\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "알 수 없는 side를 all로 처리하는 결함 검출"
+  },
+  {
+   "id": "STC-F-017",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 action 누락일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"all\", source:\"physical_button\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "누락 action을 lock으로 보정하면 R=LOCK이 된다"
+  },
+  {
+   "id": "STC-F-018",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 action 문자열이 아닌 값(true)일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"all\", action:true, source:\"physical_button\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-019",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 action 미등록 값('Lock', 대문자 시작)일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"all\", action:\"Lock\", source:\"physical_button\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "대소문자 무시 비교로 적용하면 R=LOCK이 된다"
+  },
+  {
+   "id": "STC-F-020",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 source 누락일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"all\", action:\"lock\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "source를 선택 필드로 취급하는 결함 검출(적용 시 R=LOCK)"
+  },
+  {
+   "id": "STC-F-021",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 source 문자열이 아닌 값(5)일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"all\", action:\"lock\", source:5}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-022",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "운전자 명령의 source 미등록 값('tablet')일 때 명령이 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행: L=LOCK, R=RELEASE(S-MIX)",
+   "inputs": "B0{command={side:\"all\", action:\"lock\", source:\"tablet\"}}",
+   "procedure": "1. 사전조건 S-MIX 수행\n2. 입력 전송\n3. 응답과 직후 GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "네 source 외 값을 허용하는 결함 검출"
+  },
+  {
+   "id": "STC-F-023",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "거절된 명령과 같은 스냅샷의 다른 규칙(차속 3.0 km/h 자동 잠금)은 계속 평가되는지 확인",
+   "preconditions": "S0 수행(좌·우 RELEASE)",
+   "inputs": "B0{vehicle_speed_kph=3.0, command={side:\"center\", action:\"lock\", source:\"avn\"}}",
+   "procedure": "1. S0 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID, input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "명령 거절이 스냅샷 전체 평가를 중단시키는 결함 검출"
+  },
+  {
+   "id": "STC-F-024",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "명령 객체가 비어 있는 경우({}: 세 필드 모두 누락)에도 거절되고 출력이 변하지 않는지 확인",
+   "preconditions": "S-MIX 수행",
+   "inputs": "B0{command={}}",
+   "procedure": "1. S-MIX 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "SWRS는 빈 객체를 명시하지 않음. 필드 누락 규칙(SWR-002)의 극단 사례"
+  },
+  {
+   "id": "STC-F-025",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "명령 자체가 객체가 아닌 값(문자열 'lock')일 때 거절되는지 확인",
+   "preconditions": "S-MIX 수행",
+   "inputs": "B0{command=\"lock\"}",
+   "procedure": "1. S-MIX 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[COMMAND_REJECTED], input_validity.IF-004=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "형식 오류 클래스(객체 아님). SWRS는 필드 단위 형식만 기술 → findings 참조"
+  },
+  {
+   "id": "STC-F-026",
+   "basis_ids": [
+    "SWR-002"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "명령이 없는 경우(필드 생략, null)는 거절 대상이 아니며 COMMAND_REJECTED가 나오지 않는지 확인(유효 클래스 '명령 없음')",
+   "preconditions": "S-MIX 수행",
+   "inputs": "(a) B0 (command 생략)  (b) B0{command=null}",
+   "procedure": "1. S-MIX 수행\n2. (a) 전송 후 응답 확인\n3. (b) 전송 후 응답 확인",
+   "expected": "(a),(b) 모두 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-004=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "IF-004 VALID 표기는 SWAD 2.3 기준"
+  },
+  {
+   "id": "STC-F-027",
+   "basis_ids": [
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "자동 잠금 하한 경계: 차속 2.9 및 2.99 km/h에서는 잠금되지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{vehicle_speed_kph=2.9}  (b) B0{vehicle_speed_kph=2.99}",
+   "procedure": "1. S0 수행\n2. (a) 전송 후 응답 확인\n3. (b) 전송 후 응답 확인",
+   "expected": "(a),(b) 모두 lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "2.99는 소수 첫째 자리 반올림 결함(2.95→3.0) 검출용. 차속 해상도는 SWRS에 없음(findings)"
+  },
+  {
+   "id": "STC-F-028",
+   "basis_ids": [
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "자동 잠금 경계: 차속 3.0 km/h가 들어온 같은 평가에서 좌·우가 LOCK이 되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{vehicle_speed_kph=3.0}",
+   "procedure": "1. S0 수행\n2. 입력 전송\n3. POST 응답 확인(다음 평가를 기다리지 않음)",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "비교 연산자 '>' 사용 결함(3.0에서 미잠금) 검출"
+  },
+  {
+   "id": "STC-F-029",
+   "basis_ids": [
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "속도가 3.0 km/h 미만으로 내려가도 자동 해제하지 않는지(A-06) 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{vehicle_speed_kph=3.0}  (b) B0{vehicle_speed_kph=2.9}  (c) B0{vehicle_speed_kph=0.0}",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[]\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n(c) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-030",
+   "basis_ids": [
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "차속이 JSON 정수(3)여도 유효 숫자로 처리되어 자동 잠금되는지 확인(실수 또는 정수 허용)",
+   "preconditions": "S0 수행",
+   "inputs": "B0{vehicle_speed_kph=3} (JSON 정수 리터럴 3)",
+   "procedure": "1. S0 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[], input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "float만 허용하는 타입 검사 결함 검출"
+  },
+  {
+   "id": "STC-F-031",
+   "basis_ids": [
+    "SWR-004",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "해제 조건 (a) 경계: 차속 2.9 km/h에서는 해제가 허용되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{vehicle_speed_kph=2.9, command=cmd(all,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-032",
+   "basis_ids": [
+    "SWR-004",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "해제 조건 (a) 경계: 차속 3.0 km/h에서는 해제가 거절되고 AUTO_LOCK이 출력을 결정하는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{vehicle_speed_kph=3.0, command=cmd(all,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[DRIVER_UNLOCK_REJECTED]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "'<' 대신 '<=' 사용 결함(3.0에서 해제 허용) 검출"
+  },
+  {
+   "id": "STC-F-033",
+   "basis_ids": [
+    "SWR-004"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "해제 조건 (a): IF-001 무효(차속 누락)이면 상위 규칙이 없어도 해제가 거절되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{-vehicle_speed_kph, command=cmd(all,unlock)} (차속 필드 생략)",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[DRIVER_UNLOCK_REJECTED], input_validity.IF-001=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "차속 무효를 0.0으로 간주하는 결함 검출. 거절 시 priority_reason NONE은 SWR-019 표 '해당 규칙 없음'에서 도출(findings)"
+  },
+  {
+   "id": "STC-F-034",
+   "basis_ids": [
+    "SWR-004"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "해제 조건 (c): IF-008 무효(isofix_left 누락)이면 해제가 거절되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{-isofix_left, command=cmd(all,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[DRIVER_UNLOCK_REJECTED], input_validity.IF-008=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "IF-008 무효는 DEGRADED가 아님(DEF-08)도 함께 확인"
+  },
+  {
+   "id": "STC-F-035",
+   "basis_ids": [
+    "SWR-004",
+    "SWR-018"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "해제 조건 (c): isofix_left TRUE이면 왼쪽만 해제 거절되고 오른쪽은 해제되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{isofix_left=true, command=cmd(all,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[DRIVER_UNLOCK_REJECTED]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "조건 판정을 쪽별로 하지 않고 전체 거절/전체 허용하는 결함 검출"
+  },
+  {
+   "id": "STC-F-036",
+   "basis_ids": [
+    "SWR-004",
+    "SWR-009"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "해제 조건은 명령이 선택한 쪽에 대해서만 평가되는지 확인: 오른쪽 ISOFIX TRUE, 왼쪽 해제 명령",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{isofix_right=true, command=cmd(left,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "선택하지 않은 쪽(R)의 조건 위반으로 L 해제까지 거절하는 결함 검출. 우선순위 표시는 R(순위 7)이 L(순위 9)보다 높음"
+  },
+  {
+   "id": "STC-F-037",
+   "basis_ids": [
+    "SWR-004"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "해제 조건 (d): 안전 입력 이상(IF-002 무효, DEGRADED)이면 해제가 거절되고 직전 출력이 유지되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{-crash_status, command=cmd(all,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 입력 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[DRIVER_UNLOCK_REJECTED]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "notices의 DRIVER_UNLOCK_REJECTED는 SWR-004 (d)의 문자 그대로의 해석(순위 4가 출력을 결정). findings 참조"
+  },
+  {
+   "id": "STC-F-038",
+   "basis_ids": [
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "왼쪽 접근위험 TRUE가 들어온 같은 평가에서 왼쪽만 LOCK이 되고, TRUE인 동안 매 평가 LOCK이 유지되는지 확인",
+   "preconditions": "S0 수행(좌·우 RELEASE)",
+   "inputs": "(a) B0{rear_left_approach_risk=true}  (b) (a)와 같은 스냅샷을 50 ms 간격으로 3회 추가 전송",
+   "procedure": "1. S0 수행\n2. (a) 전송, 응답 확인\n3. (b) 3회 전송, 각 응답 확인",
+   "expected": "(a), (b) 모두 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-039",
+   "basis_ids": [
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "오른쪽 접근위험 TRUE가 들어오면 오른쪽만 LOCK이 되는지 확인(좌·우 신호 매핑 교차 결함 검출)",
+   "preconditions": "S0 수행",
+   "inputs": "B0{rear_right_approach_risk=true}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-040",
+   "basis_ids": [
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "접근위험이 FALSE로 돌아와도 자동 해제하지 않고 LOCK이 유지되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{rear_left_approach_risk=true}  (b) B0 (위험 FALSE)",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송 후 응답 확인",
+   "expected": "(a) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n(b) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-041",
+   "basis_ids": [
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "스냅샷이 지연(STALE)된 경우에도 접근위험 TRUE는 LOCK 방향으로 적용되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "T = GET /api/status의 timestamp_s.\nB0{rear_left_approach_risk=true, source_timestamp_s = T - 0.300} (지연 약 300 ms)",
+   "procedure": "1. S0 수행\n2. GET /api/status로 T 읽기\n3. 입력 즉시 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=DEGRADED, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[], input_validity.FRESHNESS=STALE",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "지연을 무효 입력으로 보고 위험 TRUE를 무시하는 결함(안전 방향 위반) 검출"
+  },
+  {
+   "id": "STC-F-042",
+   "basis_ids": [
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-003 무효(위험 필드가 문자열 'true')이면 접근위험 규칙을 쓰지 않고 DEGRADED로 직전 출력을 유지하는지 확인(무효 입력을 TRUE로 해석하는 결함 검출)",
+   "preconditions": "S0 수행",
+   "inputs": "B0{rear_left_approach_risk=\"true\"} (문자열)",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-003=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "SWR-013과 공유. 위험 값 형식 오류의 안전 영향 확인"
+  },
+  {
+   "id": "STC-F-043",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "접근위험 TRUE인 쪽의 첫 해제 요청이 억제되고, 같은 명령이 연속 스냅샷에 남아 있어도 override가 되지 않는지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)",
+   "inputs": "N=B0{rear_left_approach_risk=true}, REQ=N{command=cmd(left,unlock)}",
+   "procedure": "1. 사전조건 수행\n2. REQ 전송 (source_timestamp_s 생략)\n3. REQ를 동일 내용으로 50 ms 간격 2회 추가 전송 (명령 계속 남아 있음)\n4. N 전송 (명령 없음)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n3) 두 응답 모두 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[] (override 아님, UNLOCK_SUPPRESSED 재발생 없음)\n4) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "DEF-09 연속 명령은 하나의 입력. 3)의 notices=[] 는 DEF-09에서 도출한 해석(findings)"
+  },
+  {
+   "id": "STC-F-044",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "override 창 하한 경계: 재요청 시각 - t0 = 0 ms이면 override가 되는지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)\n시험 스크립트가 150 ms 이내에 단계 3~4를 끝낼 수 있어야 함",
+   "inputs": "ts1 = floor_ms(GET /api/status의 timestamp_s)\nREQ1=N{command=cmd(left,unlock), source_timestamp_s=ts1}\nREQ2=REQ1과 동일(source_timestamp_s=ts1)",
+   "procedure": "1. 사전조건 수행\n2. T 읽고 ts1 계산, REQ1 전송\n3. N 전송 (ts 생략, 명령 없음)\n4. REQ2 전송 (ts=ts1; 응답 timestamp_s - ts1 <= 190 ms 인 시도만 유효)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n3) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n4) lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "재요청 시각 > t0 로 구현해 0 ms를 거절하는 결함 검출"
+  },
+  {
+   "id": "STC-F-045",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "override 창 상한 경계: 재요청 시각 - t0 = 10,000 ms이면 override가 되는지 확인하고, override 후 위험 TRUE 유지 중 RELEASE가 유지되는지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)",
+   "inputs": "ts1 = floor_ms(T)\nREQ1=N{command=cmd(left,unlock), source_timestamp_s=ts1}\nREQ2=REQ1{source_timestamp_s=ts1+10.000}\nN",
+   "procedure": "1. 사전조건 수행\n2. T 읽고 ts1 계산, REQ1 전송\n3. N을 100 ms 이하 주기로 반복 전송(KA), 서버 시각(응답 timestamp_s)이 ts1+10.000 이상이 될 때까지\n4. 서버 시각 >= ts1+10.000 이 된 즉시 REQ2 전송 (응답 timestamp_s - source_timestamp_s <= 190 ms 인 시도만 유효, 아니면 재시험)\n5. N 전송",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n3) KA 응답 모두 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n4) lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]\n5) lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "'<' 대신 '<=' 결함(10,000에서 재억제) 검출. 총 약 11 s 소요"
+  },
+  {
+   "id": "STC-F-046",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "override 창 바깥 경계: 재요청 시각 - t0 = 10,001 ms이면 override가 아니라 다시 억제되고 t0가 갱신되는지 확인(갱신 후 3,000 ms 내 재요청은 override)",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)",
+   "inputs": "ts1 = floor_ms(T)\nREQ1=N{command=cmd(left,unlock), ts=ts1}\nREQ2=동일 명령, ts=ts1+10.001\nREQ3=동일 명령, ts=ts1+10.001+3.000",
+   "procedure": "1. 사전조건 수행\n2. REQ1 전송\n3. N을 100 ms 이하 주기로 반복 전송(KA), 서버 시각 >= ts1+10.001 까지\n4. 서버 시각 >= ts1+10.001 즉시 REQ2 전송 (age <= 190 ms)\n5. N을 100 ms 이하 주기로 반복 전송(KA), 서버 시각 >= ts1+13.001 까지\n6. 서버 시각 >= ts1+13.001 즉시 REQ3 전송 (age <= 190 ms)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n4) 창 초과이므로 새 첫 요청으로 다시 억제: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n6) t0가 ts2(=ts1+10.001)로 갱신되었으므로 3,000 ms 재요청은 override: lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "t0 미갱신 결함은 6단계에서 SUP(재억제)가 된다. 총 약 14 s 소요"
+  },
+  {
+   "id": "STC-F-047",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "시간 반올림 경계(DEF-04): 재요청 시각 - t0 = 10,000.4 ms는 override, 10,000.6 ms는 재억제인지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)\n파트 A와 B는 각각 서버를 신규 기동해 수행",
+   "inputs": "파트 A: ts2 = ts1 + 10.0004\n파트 B: ts2 = ts1 + 10.0006\n(ts1 = floor_ms(T), REQ는 6-3과 동일 형식)",
+   "procedure": "1. 파트 A: 사전조건, REQ1(ts1), KA, 서버 시각 >= ts2 즉시 REQ2(ts2) 전송 (age <= 190 ms)\n2. 파트 B: 서버 재기동, 사전조건, REQ1(ts1), KA, 서버 시각 >= ts2 즉시 REQ2(ts2) 전송",
+   "expected": "파트 A REQ2: 시간차가 ms 정수로 10,000이므로 lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]\n파트 B REQ2: 10,001이므로 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "반올림 없이 부동소수 비교(10.0004 > 10.0 이면 재억제)하는 결함은 파트 A에서, 절사 결함은 파트 B에서 검출. 각 파트 약 11 s"
+  },
+  {
+   "id": "STC-F-048",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "시간 기준 확인: 시간차를 서버 수신 시각이 아니라 스냅샷 source_timestamp_s로 계산하는지(수신 지연이 서로 다른 두 요청)",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)\n파트 A와 B는 각각 서버를 신규 기동해 수행",
+   "inputs": "파트 A: REQ1 ts1 = T - 0.150(수신 지연 약 150 ms), REQ2 ts2 = ts1 + 10.100(수신 지연 약 0 ms)\n파트 B: REQ1 ts1 = T(지연 약 0 ms), REQ2 ts2 = ts1 + 9.900를 서버 시각 >= ts2+0.150 일 때 전송(수신 지연 약 150 ms)",
+   "procedure": "1. 파트 A: 사전조건, REQ1(ts1=T-0.150) 전송, KA, 서버 시각 >= ts2 즉시 REQ2 전송\n2. 파트 B: 서버 재기동, 사전조건, REQ1(ts1=T) 전송, KA, 서버 시각 >= ts2+0.150 즉시 REQ2(ts2) 전송\n3. 각 REQ의 응답 timestamp_s - source_timestamp_s 가 0~190 ms 범위인 시도만 유효",
+   "expected": "파트 A REQ2: source_timestamp_s 차 10,100 ms > 10,000 이므로 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n파트 B REQ2: 차 9,900 ms <= 10,000 이므로 lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "수신 시각(now) 기준으로 계산하는 결함은 파트 A에서 9.95 s로 보아 override, 파트 B에서 10.05 s로 보아 재억제한다."
+  },
+  {
+   "id": "STC-F-049",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "반대쪽 해제 요청은 override가 아니며 반대쪽(위험 없음) 요청은 그대로 처리되는지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)",
+   "inputs": "REQ1=N{command=cmd(left,unlock)}\nREQR=N{command=cmd(right,unlock)}",
+   "procedure": "1. 사전조건 수행\n2. REQ1 전송\n3. N 전송\n4. REQR 전송",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n4) 왼쪽은 억제 유지, 오른쪽 해제 요청은 정상 처리: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "반대쪽 요청을 같은 쪽 재요청으로 오인해 L override가 되는 결함 검출"
+  },
+  {
+   "id": "STC-F-050",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "side=all 해제 요청이 위험 쪽에는 억제/override 규칙으로, 위험 없는 쪽에는 정상 해제로 동시에 처리되는지 확인",
+   "preconditions": "S-LOCK 수행 후 N 전송 (L=LOCK, R=LOCK)",
+   "inputs": "REQA=N{command=cmd(all,unlock)}",
+   "procedure": "1. 사전조건 수행\n2. REQA 전송\n3. N 전송\n4. REQA 전송 (1 s 이내, ts 생략)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED], UNLOCK_SUPPRESSED와 함께 DRIVER_UNLOCK_REJECTED가 나오는지는 관찰만 기록(findings)\n3) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n4) L override, R 해제 유지: lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "2)의 notices 판정은 UNLOCK_SUPPRESSED 포함 여부만"
+  },
+  {
+   "id": "STC-F-051",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-009"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "접근위험 가드가 쪽별로 독립인지 확인: 양쪽 위험 TRUE에서 왼쪽 요청 후 오른쪽 첫 요청은 override가 아니고, 이후 왼쪽 재요청만 override",
+   "preconditions": "S-LOCK 수행 후 N2=B0{rear_left_approach_risk=true, rear_right_approach_risk=true} 전송 (L=LOCK, R=LOCK)",
+   "inputs": "REQL=N2{command=cmd(left,unlock)}, REQR=N2{command=cmd(right,unlock)}",
+   "procedure": "1. 사전조건 수행\n2. REQL 전송\n3. N2 전송\n4. REQR 전송\n5. N2 전송\n6. REQL 전송 (1 s 이내)",
+   "expected": "2) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n4) 오른쪽은 자기 쪽 첫 요청이므로 억제: lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n6) lock_left=RELEASE, lock_right=LOCK, state=OVERRIDE, priority_reason=APPROACH_RISK, notices=[] (reason_code는 좌 APPROACH_OVERRIDE/우 APPROACH_RISK 동순위라 판정 제외, 관찰 기록)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "t0/override를 좌·우 공유하는 결함은 4단계에서 R override(RELEASE)가 된다"
+  },
+  {
+   "id": "STC-F-052",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "override가 10,000 ms 이상 유지되고, 위험 FALSE에서 종료되며, 위험 TRUE 재발생 시 다시 LOCK이 되는지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)\n시험 스크립트가 150 ms 이내에 단계 2를 끝낼 수 있어야 함",
+   "inputs": "OV(override 설정 절차) 후 N 반복 전송, B0, N",
+   "procedure": "1. OV 수행: ts1=floor_ms(T), REQ1(ts=ts1), N, REQ1(ts=ts1) -> L override 성립 확인\n2. N을 100 ms 주기로 11 s간 전송 (매 응답 확인)\n3. B0 전송 (위험 FALSE)\n4. N 전송 (위험 TRUE 재발생, 명령 없음)",
+   "expected": "1) lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]\n2) 11 s 동안 모든 응답 lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[] (창 10,000 ms 경과로 override가 풀리지 않음)\n3) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n4) override가 남아있지 않으므로 lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "override 지속 시간을 창과 혼동하는 결함, 종료 후 플래그 잔존 결함 검출"
+  },
+  {
+   "id": "STC-F-053",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "override 중 그 쪽을 포함하는 운전자 잠금 명령(새 입력)이 override를 끝내는지(CR-03), 반대쪽 잠금 명령은 끝내지 않는지 확인",
+   "preconditions": "OV 수행(L override 성립, 좌·우 RELEASE)",
+   "inputs": "N{command=cmd(right,lock)}, N{command=cmd(left,lock)}",
+   "procedure": "1. OV 수행\n2. N{cmd(right,lock)} 전송\n3. N 전송 (명령 없음)\n4. N{cmd(left,lock)} 전송\n5. N 전송 (명령 없음)",
+   "expected": "2) L override 유지, R 잠금 적용: lock_left=RELEASE, lock_right=LOCK, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]\n3) 같은 값(lock_left=RELEASE, lock_right=LOCK, state=OVERRIDE)\n4) override 종료, L LOCK: lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n5) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "CR-03 반영 확인. 4)에서 override를 끝내지 못하면 L=RELEASE가 남는다"
+  },
+  {
+   "id": "STC-F-054",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "override 중 side=all 잠금 명령도 override를 끝내는지(all은 좌·우 모두를 뜻함) 확인",
+   "preconditions": "OV 수행",
+   "inputs": "N{command=cmd(all,lock)}",
+   "procedure": "1. OV 수행\n2. N{cmd(all,lock)} 전송\n3. N 전송",
+   "expected": "2) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n3) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "side 비교를 'left'와의 동등 비교로만 구현한 결함 검출"
+  },
+  {
+   "id": "STC-F-055",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-020"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "시동 OFF가 override를 초기화하는지 확인: OFF 평가에서 위험 TRUE인 왼쪽은 LOCK, 시동 ON 복귀 후에도 override가 되살아나지 않는지",
+   "preconditions": "OV 수행",
+   "inputs": "(a) N{ignition_on=false}  (b) N (ignition_on=true)",
+   "procedure": "1. OV 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) 초기화 후 판정: lock_left=LOCK, lock_right=RELEASE, state=OFF, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n(b) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "초기화를 판정 뒤에 하거나 하지 않는 결함 검출: (a)에서 L=RELEASE/OVERRIDE"
+  },
+  {
+   "id": "STC-F-056",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "충돌 해제가 override를 끝내는지 확인: 충돌 래치 해제(시동 OFF->ON) 후 위험이 계속 TRUE여도 override가 되살아나지 않고 LOCK",
+   "preconditions": "OV 수행",
+   "inputs": "(a) N{crash_status=\"CONFIRMED\"}  (b) N{ignition_on=false} (c) N",
+   "procedure": "1. OV 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]\n(b) lock_left=LOCK, lock_right=RELEASE, state=OFF, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n(c) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "(a)에서 override 플래그가 초기화되지 않으면 (c)에서 RELEASE/OVERRIDE로 복귀"
+  },
+  {
+   "id": "STC-F-057",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "센서 고장이 override를 끝내는지 확인: 고장 해제 후 위험 TRUE 유지 시 LOCK",
+   "preconditions": "OV 수행",
+   "inputs": "(a) N{sensor_fault=true}  (b) N",
+   "procedure": "1. OV 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]\n(b) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "(b)에서 L=RELEASE/OVERRIDE이면 override가 센서 고장으로 끝나지 않은 것"
+  },
+  {
+   "id": "STC-F-058",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "안전 입력 이상(지연)이 override를 끝내는지 확인: 지연 스냅샷에서 L=LOCK, 정상 복귀 후에도 override가 되살아나지 않음",
+   "preconditions": "OV 수행",
+   "inputs": "T = GET /api/status timestamp_s\n(a) N{source_timestamp_s=T-0.300}  (b) N",
+   "procedure": "1. OV 수행\n2. GET /api/status로 T 읽기\n3. (a) 전송\n4. (b) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=RELEASE, state=DEGRADED, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[], input_validity.FRESHNESS=STALE\n(b) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-059",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "DEGRADED 중에는 해제 재요청이 override로 처리되지 않는지 확인(A-07)",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)",
+   "inputs": "REQ1=N{command=cmd(left,unlock)}\nREQS=N{command=cmd(left,unlock), source_timestamp_s=T-0.300}",
+   "procedure": "1. 사전조건 수행\n2. REQ1 전송\n3. N 전송\n4. GET /api/status로 T 읽기\n5. REQS 전송(지연 스냅샷에 재요청)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n5) lock_left=LOCK, lock_right=RELEASE, state=DEGRADED, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK (notices는 판정 제외, 관찰 기록)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "DEGRADED 조건을 검사하지 않고 override 하는 결함은 L=RELEASE가 됨"
+  },
+  {
+   "id": "STC-F-060",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "위험 TRUE 시작과 해제 요청이 같은 스냅샷에 들어와도 억제되고 t0가 기록되어, 이후 창 안 재요청이 override가 되는지 확인",
+   "preconditions": "S0 수행(좌·우 RELEASE)",
+   "inputs": "REQ=B0{rear_left_approach_risk=true, command=cmd(left,unlock)}, N",
+   "procedure": "1. S0 수행\n2. REQ 전송\n3. N 전송\n4. REQ 전송 (1 s 이내)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n3) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n4) lock_left=RELEASE, lock_right=RELEASE, state=OVERRIDE, priority_reason=APPROACH_RISK, reason_code=APPROACH_OVERRIDE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "평가 순서(위험 판정 후 억제)에 따라 첫 스냅샷에서 요청이 적용되는 결함 검출"
+  },
+  {
+   "id": "STC-F-061",
+   "basis_ids": [
+    "SWR-006"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "위험이 FALSE였다가 다시 TRUE가 된 뒤의 첫 해제 요청은 이전 t0와 무관하게 새 첫 요청으로 억제되는지 확인",
+   "preconditions": "S0 수행 후 N=B0{rear_left_approach_risk=true} 전송 (L=LOCK, R=RELEASE, APPROACH_RISK)",
+   "inputs": "REQ=N{command=cmd(left,unlock)}",
+   "procedure": "1. 사전조건 수행\n2. REQ 전송\n3. B0 전송 (위험 FALSE)\n4. N 전송 (위험 TRUE)\n5. REQ 전송 (첫 요청 후 1 s 이내)",
+   "expected": "2) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]\n5) 위험 FALSE로 억제 이력이 초기화되었으므로 재억제: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[UNLOCK_SUPPRESSED]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "SWRS는 위험 FALSE 시 t0 초기화를 명시하지 않음. SWAD 3.4 상태도(SUPPRESSED -> IDLE: 위험 FALSE)에 근거. findings 참조"
+  },
+  {
+   "id": "STC-F-062",
+   "basis_ids": [
+    "SWR-006",
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "입력 중단(tick 평가의 DEGRADED)이 override를 끝내는지 확인",
+   "preconditions": "OV 수행",
+   "inputs": "OV 이후 입력 전송을 중단 (400 ms), 이후 N 1회",
+   "procedure": "1. OV 수행\n2. 입력을 400 ms 동안 보내지 않음\n3. GET /api/status 확인\n4. N 전송",
+   "expected": "3) 마지막 스냅샷의 위험 TRUE가 tick에서 재판정됨: lock_left=LOCK, lock_right=RELEASE, state=DEGRADED, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[], input_validity.FRESHNESS=STALE\n4) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "tick 평가에서 override를 유지(RELEASE)하는 결함 검출"
+  },
+  {
+   "id": "STC-F-063",
+   "basis_ids": [
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "CONFIRMED가 들어온 같은 평가에서 좌·우가 RELEASE가 되고 상태 EMERGENCY, 이유 CRASH_CONFIRMED인지 확인(좌·우 LOCK 상태에서)",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\"}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인(다음 평가를 기다리지 않음)",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-064",
+   "basis_ids": [
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "래치 유지: CONFIRMED 이후 crash_status가 NONE이거나 잠금 명령, 차속 3.0, 접근위험, ISOFIX가 들어와도 RELEASE가 유지되는지 확인",
+   "preconditions": "S-LOCK 수행 후 B0{crash_status=\"CONFIRMED\"} 전송 (EMERGENCY)",
+   "inputs": "(a) B0  (b) B0{command=cmd(all,lock)}  (c) B0{vehicle_speed_kph=3.0}  (d) B0{rear_left_approach_risk=true, rear_right_approach_risk=true}  (e) B0{isofix_left=true, isofix_right=true}",
+   "procedure": "1. 사전조건 수행\n2. (a)~(e)를 순서대로 전송(각 사이 50 ms), 각 응답 확인",
+   "expected": "(a)~(e) 모두 lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "래치 대신 현재 crash_status만 보는 결함, 하위 규칙이 래치를 덮는 결함 검출"
+  },
+  {
+   "id": "STC-F-065",
+   "basis_ids": [
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "CONFIRMED는 다른 그룹 이상(지연(STALE, 지연 약 300 ms))과 관계없이 적용되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\", source_timestamp_s = T - 0.300 (T = GET /api/status timestamp_s)}",
+   "procedure": "1. S-LOCK 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "freshness 무효 시 충돌 판단을 건너뛰는 결함 검출"
+  },
+  {
+   "id": "STC-F-066",
+   "basis_ids": [
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "CONFIRMED는 다른 그룹 이상(IF-001 무효(차속 필드 누락))과 관계없이 적용되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\", -vehicle_speed_kph}",
+   "procedure": "1. S-LOCK 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-067",
+   "basis_ids": [
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "CONFIRMED는 다른 그룹 이상(IF-003 무효(rear_left_approach_risk=\"true\" 문자열))과 관계없이 적용되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\", rear_left_approach_risk=\"true\"}",
+   "procedure": "1. S-LOCK 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-068",
+   "basis_ids": [
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "CONFIRMED는 다른 그룹 이상(IF-009 무효(sensor_fault 필드 누락))과 관계없이 적용되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\", -sensor_fault}",
+   "procedure": "1. S-LOCK 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "다른 안전 그룹 무효가 충돌 규칙을 막는 결함 검출"
+  },
+  {
+   "id": "STC-F-069",
+   "basis_ids": [
+    "SWR-007",
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "CONFIRMED는 센서 고장(순위 2)보다 우선하여 RELEASE가 되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\", sensor_fault=true}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "순위 1과 2의 쌍"
+  },
+  {
+   "id": "STC-F-070",
+   "basis_ids": [
+    "SWR-007",
+    "SWR-020"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "래치는 시동 OFF에서만 해제되고, 해제 후에는 일반 평가(명령 적용)로 돌아가는지 확인",
+   "preconditions": "S-LOCK 수행 후 B0{crash_status=\"CONFIRMED\"} 전송 (EMERGENCY)",
+   "inputs": "(a) B0{ignition_on=false}  (b) B0  (c) B0{command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n(c) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "(c)에서 RELEASE가 유지되면 래치가 해제되지 않은 것"
+  },
+  {
+   "id": "STC-F-071",
+   "basis_ids": [
+    "SWR-007",
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "crash_status가 미등록 값('confirmed' 소문자)이면 충돌 판단을 하지 않고 IF-002 무효(DEGRADED)가 되며 래치되지 않는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) B0{crash_status=\"confirmed\"}  (b) B0",
+   "procedure": "1. S-LOCK 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-002=INVALID\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "대소문자 무시 비교 결함은 (a)에서 RELEASE/EMERGENCY"
+  },
+  {
+   "id": "STC-F-072",
+   "basis_ids": [
+    "SWR-008"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "PENDING은 출력·이유 코드를 바꾸지 않고 알림 CRASH_PENDING만 내며, NONE으로 돌아가면 알림이 사라지고 래치되지 않는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) B0{crash_status=\"PENDING\"}  (b) B0  (c) B0{command=cmd(all,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[CRASH_PENDING]\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n(c) 래치 없음: lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PENDING을 CONFIRMED처럼 처리(RELEASE)하는 결함, PENDING 래치 결함 검출"
+  },
+  {
+   "id": "STC-F-073",
+   "basis_ids": [
+    "SWR-008"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "PENDING 중에도 다른 규칙(자동 잠금, 운전자 해제)이 계속 평가되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{crash_status=\"PENDING\", vehicle_speed_kph=3.0}  (b) B0{crash_status=\"PENDING\", command=cmd(all,unlock)} (차속 0.0)",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[CRASH_PENDING]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[CRASH_PENDING]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PENDING에서 평가를 중단하는 결함 검출"
+  },
+  {
+   "id": "STC-F-074",
+   "basis_ids": [
+    "SWR-008"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "PENDING -> CONFIRMED 전이에서 SWR-007 동작(좌·우 RELEASE, EMERGENCY)이 적용되고 이후 래치되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) B0{crash_status=\"PENDING\"}  (b) B0{crash_status=\"CONFIRMED\"}  (c) B0",
+   "procedure": "1. S-LOCK 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[CRASH_PENDING]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]\n(c) lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-075",
+   "basis_ids": [
+    "SWR-008",
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "tick 평가(입력 중단 후)에서도 마지막 스냅샷 기준으로 CRASH_PENDING 알림이 유지되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{crash_status=\"PENDING\"} 전송 후 입력 중단 400 ms",
+   "procedure": "1. S0 수행\n2. 전송\n3. 400 ms 대기(입력 없음)\n4. GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[CRASH_PENDING]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "SWAD 3.2(tick에서 입력 상태 알림 재발행)에 근거. SWRS에는 tick의 notices 규정이 없음"
+  },
+  {
+   "id": "STC-F-076",
+   "basis_ids": [
+    "SWR-009"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "왼쪽 접근위험 TRUE가 오른쪽 명령 처리에 영향을 주지 않는지 확인(위험 FALSE일 때와 비교)",
+   "preconditions": "S-LOCK 수행. 파트 A(대조)와 B(시험)는 각각 서버 신규 기동",
+   "inputs": "파트 A: B0{command=cmd(right,unlock)}\n파트 B: B0{rear_left_approach_risk=true, command=cmd(right,unlock)}",
+   "procedure": "1. 파트 A: S-LOCK, 입력 전송, 응답 확인\n2. 파트 B: 서버 재기동, S-LOCK, 입력 전송, 응답 확인",
+   "expected": "A) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]\nB) 오른쪽 출력과 우측 명령 처리가 A와 같음: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "우측 해제 명령에도 UNLOCK_SUPPRESSED가 나오거나 R이 LOCK 유지되는 결함 검출"
+  },
+  {
+   "id": "STC-F-077",
+   "basis_ids": [
+    "SWR-009"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "오른쪽 접근위험 TRUE가 왼쪽 명령 처리에 영향을 주지 않는지 확인(좌우 대칭)",
+   "preconditions": "S-LOCK 수행. 파트 A(대조)와 B(시험)는 각각 서버 신규 기동",
+   "inputs": "파트 A: B0{command=cmd(left,unlock)}\n파트 B: B0{rear_right_approach_risk=true, command=cmd(left,unlock)}",
+   "procedure": "1. 파트 A: S-LOCK, 입력 전송, 응답 확인\n2. 파트 B: 서버 재기동, S-LOCK, 입력 전송, 응답 확인",
+   "expected": "A) lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]\nB) 왼쪽 출력과 좌측 명령 처리가 A와 같음: lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-078",
+   "basis_ids": [
+    "SWR-009",
+    "SWR-018"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "왼쪽 ISOFIX TRUE가 오른쪽 명령 처리와 출력에 영향을 주지 않는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{isofix_left=true, command=cmd(right,unlock)}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "오른쪽 해제 명령이 거절(DRIVER_UNLOCK_REJECTED)되는 결함 검출"
+  },
+  {
+   "id": "STC-F-079",
+   "basis_ids": [
+    "SWR-009"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "한쪽 접근위험과 반대쪽 ISOFIX가 동시에 TRUE일 때 각 쪽이 자기 규칙만 따르고 위험 해제 시 반대쪽 영향이 없는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{rear_left_approach_risk=true, isofix_right=true}  (b) B0{isofix_right=true} (위험 FALSE)",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "(b)에서 R이 위험 FALSE에 끌려 RELEASE가 되거나 L이 자동 해제되는 결함 검출"
+  },
+  {
+   "id": "STC-F-080",
+   "basis_ids": [
+    "SWR-010"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "모든 스냅샷 평가(결과가 같은 것 포함)가 이벤트로 기록되어 event_id가 1..N 연속이고, 변화 없는 tick은 기록되지 않는지 확인",
+   "preconditions": "시험 서버 신규 기동 (이벤트 0건, GET /api/events = [])",
+   "inputs": "스냅샷 5건: (1) B0 (2) B0{vehicle_speed_kph=3.0} (3) B0{vehicle_speed_kph=0.0} (4) B0 (5) B0{crash_status=\"PENDING\"}, 각 사이 50 ms",
+   "procedure": "1. 서버 신규 기동\n2. (1)~(5) 순서대로 POST /api/snapshot\n3. GET /api/events 확인\n4. 입력 없이 120 ms 대기(200 ms 미만) 후 GET /api/events 재확인",
+   "expected": "3) 이벤트 5건, event_id = [1,2,3,4,5] (오래된 순). (1) RELEASE/RELEASE NORMAL NO_CHANGE, (2) LOCK/LOCK AUTO_LOCK_SPEED, (3) LOCK/LOCK NO_CHANGE, (4) LOCK/LOCK NO_CHANGE (결과가 직전과 같아도 기록), (5) LOCK/LOCK NO_CHANGE notices=[CRASH_PENDING]\n4) 여전히 5건 (변화 없는 tick은 기록되지 않음)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "결과 불변 스냅샷을 중복으로 간주해 기록을 건너뛰는 결함 검출(event_id 비연속)"
+  },
+  {
+   "id": "STC-F-081",
+   "basis_ids": [
+    "SWR-010",
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "변화 있는 tick(입력 중단 -> DEGRADED)이 이벤트로 기록되고, 이후 변화 없는 tick과 상태 조회는 기록되지 않으며 새 스냅샷이 다음 event_id를 받는지 확인",
+   "preconditions": "시험 서버 신규 기동",
+   "inputs": "B0 1건 전송 후 입력 중단 (a) 400 ms (b) 추가 1 s (c) GET /api/status 10회 (d) B0 전송",
+   "procedure": "1. 서버 신규 기동, B0 전송 (event_id 1)\n2. (a) 400 ms 대기 후 GET /api/events\n3. (b) 1 s 더 대기 후 GET /api/events\n4. (c) GET /api/status 10회 호출 후 GET /api/events\n5. (d) B0 전송 후 GET /api/events",
+   "expected": "(a) 이벤트 2건: event_id=2, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, lock_left=RELEASE, lock_right=RELEASE\n(b) 2건 유지\n(c) 2건 유지\n(d) 3건, event_id=3, state=NORMAL",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "tick마다 기록하거나(2건 이상 증가) tick 변화를 기록하지 않는 결함 검출"
+  },
+  {
+   "id": "STC-F-082",
+   "basis_ids": [
+    "SWR-011"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "결정 이벤트의 필드 집합이 허용 8개와 정확히 같고(input_validity 등 추가 필드 없음), timestamp_s가 평가 시각이며 notices가 있는 이벤트도 동일한지 확인",
+   "preconditions": "시험 서버 신규 기동",
+   "inputs": "B0{crash_status=\"PENDING\"} 1건 전송 후 입력 중단 400 ms (tick 이벤트 생성)",
+   "procedure": "1. 서버 신규 기동\n2. B0{crash_status=\"PENDING\"} 전송, 응답의 timestamp_s 기록\n3. 400 ms 대기\n4. GET /api/events 확인",
+   "expected": "이벤트 2건. 각 이벤트의 키 집합 == {event_id, timestamp_s, lock_left, lock_right, state, priority_reason, reason_code, notices} (정확히 8개, input_validity·source·개인 식별 필드 없음).\n1번 이벤트: notices=[CRASH_PENDING], timestamp_s = 응답의 timestamp_s.\n2번 이벤트(tick): state=DEGRADED, reason_code=INPUT_STALE",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "Decision JSON(input_validity 포함)을 그대로 저장하는 결함 검출"
+  },
+  {
+   "id": "STC-F-083",
+   "basis_ids": [
+    "SWR-012"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "보존 경계 100/101건: 100건까지는 전부 보존, 101건째부터 가장 오래된 것부터 삭제되며 조회가 오래된 순인지 확인",
+   "preconditions": "시험 서버 신규 기동. 시험 전 서버 작업 디렉터리의 파일 목록(이름, 수정 시각) 기록",
+   "inputs": "스냅샷 B0를 50 ms 이하 간격으로 100건, 이어서 1건, 이어서 5건 전송",
+   "procedure": "1. 서버 신규 기동, 파일 목록 기록\n2. B0 100건 전송 후 GET /api/events\n3. B0 1건 추가 후 GET /api/events\n4. B0 5건 추가 후 GET /api/events\n5. 작업 디렉터리 파일 목록 재확인",
+   "expected": "2) 100건, event_id 1..100 오름차순\n3) 100건, event_id 2..101 오름차순 (1번 삭제)\n4) 100건, event_id 7..106 오름차순\n5) 시험 전후 파일 목록 동일(실행 중 파일 생성 없음)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "상한을 99/101로 구현, 최신 것부터 삭제, 내림차순 반환 결함 검출. 모든 호출이 200 ms 내에 이어져야 함(tick 이벤트 혼입 방지)"
+  },
+  {
+   "id": "STC-F-084",
+   "basis_ids": [
+    "SWR-012"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "프로세스 재기동 후 이력이 남아 있지 않은지(영속 저장 없음) 확인",
+   "preconditions": "직전 케이스 수행 직후 상태(이벤트 106건 발생), 서버 실행 중",
+   "inputs": "서버 프로세스 종료 후 동일 명령으로 재기동",
+   "procedure": "1. GET /api/events가 100건인 것 확인\n2. 서버 프로세스 종료\n3. python -m child_lock.web --port 8000 재기동\n4. GET /api/events 확인 (스냅샷 전송 전)\n5. B0 1건 전송 후 GET /api/events",
+   "expected": "4) 빈 배열 [] (0건)\n5) 1건, event_id=1",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "재기동 후 event_id가 이어지거나(101~) 이전 이력이 복원되는 결함 검출"
+  },
+  {
+   "id": "STC-F-085",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "차속 하한 경계: 0.0 km/h는 유효, -0.1 km/h는 IF-001 무효(DEGRADED 아님, 자동 잠금 없음)",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{vehicle_speed_kph=0.0}  (b) B0{vehicle_speed_kph=-0.1}",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=VALID\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "IF-001 무효를 DEGRADED로 올리는 결함, -0.1을 0으로 보정하는 결함 검출"
+  },
+  {
+   "id": "STC-F-086",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "차속 상한 경계: 300.1 km/h는 IF-001 무효로 자동 잠금되지 않고, 300.0 km/h는 유효로 자동 잠금",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{vehicle_speed_kph=300.1}  (b) B0{vehicle_speed_kph=300.0}",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=INVALID\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[], input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "(a)에서 300으로 클램프해 잠금하는 결함, (b)에서 상한 미포함 결함 검출"
+  },
+  {
+   "id": "STC-F-087",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "차속 형식 무효 클래스(bool true)가 IF-001 INVALID로 판정되어 자동 잠금에 쓰이지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{vehicle_speed_kph=true}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "bool을 숫자로 받아들이는 결함(Python bool은 int의 하위 타입)"
+  },
+  {
+   "id": "STC-F-088",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "차속 형식 무효 클래스(문자열 \"50\")가 IF-001 INVALID로 판정되어 자동 잠금에 쓰이지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{vehicle_speed_kph=\"50\"}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "숫자 문자열을 변환해 50 km/h로 처리하면 LOCK이 됨"
+  },
+  {
+   "id": "STC-F-089",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "차속 형식 무효 클래스(누락)가 IF-001 INVALID로 판정되어 자동 잠금에 쓰이지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{-vehicle_speed_kph}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-090",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "gear 미등록 값('d' 소문자)이면 IF-001 그룹 전체가 무효가 되어 유효한 차속 50 km/h도 자동 잠금에 쓰이지 않는지 확인(DEF-07 그룹 단위)",
+   "preconditions": "S0 수행",
+   "inputs": "B0{gear=\"d\", vehicle_speed_kph=50.0}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "필드 단위로만 검증해 차속 50을 사용하는 결함 검출"
+  },
+  {
+   "id": "STC-F-091",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "gear 유효 값 4종(P, N, D, R)이 모두 유효이고 gear 값이 출력에 영향을 주지 않는지 확인(차속 0.0)",
+   "preconditions": "S0 수행",
+   "inputs": "B0{gear=\"P\"}, B0{gear=\"N\"}, B0{gear=\"D\"}, B0{gear=\"R\"} 순서로 전송",
+   "procedure": "1. S0 수행\n2. 4건 전송(각 사이 50 ms), 각 응답 확인",
+   "expected": "4건 모두 lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-001=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "gear를 쓰는 OEM 요구 없음(SWRS 6장). gear에 따라 잠금하는 결함 검출"
+  },
+  {
+   "id": "STC-F-092",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-002 무효(누락)이면 안전 입력 이상으로 DEGRADED가 되고 직전 출력이 유지되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{-crash_status}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-002=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "DEGRADED에서 출력을 RELEASE(기본값)나 LOCK(안전측 가정)으로 바꾸는 결함 검출"
+  },
+  {
+   "id": "STC-F-093",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-002 무효(정수 2(문자열 아님))이면 안전 입력 이상으로 DEGRADED가 되고 직전 출력이 유지되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=2}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-002=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "DEGRADED에서 출력을 RELEASE(기본값)나 LOCK(안전측 가정)으로 바꾸는 결함 검출"
+  },
+  {
+   "id": "STC-F-094",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-003 한쪽 필드만 무효(왼쪽 'yes' 문자열, 오른쪽 TRUE)이면 그룹 전체가 무효로 오른쪽 위험도 사용되지 않고 DEGRADED인지 확인(DEF-07)",
+   "preconditions": "S0 수행",
+   "inputs": "B0{rear_left_approach_risk=\"yes\", rear_right_approach_risk=true}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-003=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "유효한 오른쪽 TRUE만 사용해 R=LOCK이 되는 결함 검출"
+  },
+  {
+   "id": "STC-F-095",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-003 한쪽 필드 누락(rear_right 누락, 왼쪽 TRUE)이면 그룹 전체가 무효로 왼쪽 위험도 사용되지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{rear_left_approach_risk=true, -rear_right_approach_risk}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-003=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "안전 요구(SWR-005)와 DEF-07의 상호작용: 일부 필드 손실 시 TRUE도 무시됨(findings)"
+  },
+  {
+   "id": "STC-F-096",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-009 무효(sensor_fault 누락)이면 유효한 ignition_on=false도 쓰이지 않아 시동 OFF 해제가 일어나지 않고 DEGRADED인지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{ignition_on=false, -sensor_fault}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-009=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "필드 단위 검증으로 시동 OFF를 적용(RELEASE/OFF)하는 결함 검출"
+  },
+  {
+   "id": "STC-F-097",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-009 무효(ignition_on='on' 문자열)이면 sensor_fault=true도 쓰이지 않아 FAULT가 아니라 DEGRADED인지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{ignition_on=\"on\", sensor_fault=true}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-009=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-098",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-007 무효(overtemperature_detected 누락)이면 DEGRADED가 아니고 유효한 fire_detected=true도 쓰이지 않아(그룹 비활성) 강제 해제가 일어나지 않는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{fire_detected=true, -overtemperature_detected}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-007=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "IF-007 무효를 안전 입력 이상으로 올리는 결함, 필드 단위 검증으로 화재 해제하는 결함 검출. 화재 신호 일부 손실 시 해제 불가는 findings"
+  },
+  {
+   "id": "STC-F-099",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-018"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "IF-008 무효(isofix_left 누락)이면 DEGRADED가 아니고 유효한 isofix_right=true도 쓰이지 않아 잠금되지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{-isofix_left, isofix_right=true}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-008=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-100",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "지연 경계 200/201 ms: 지연이 200 ms 이하이면 정상, 201 ms 이상이면 STALE로 DEGRADED(INPUT_STALE)인지 확인(응답 timestamp_s로 사후 판정)",
+   "preconditions": "S-LOCK 수행. 서버 시각을 시험자가 정확히 제어할 수 없으므로 지연을 사후 계산한다",
+   "inputs": "각 시도: T = GET /api/status의 timestamp_s, B0{source_timestamp_s = T - d} 전송. d를 0.190, 0.195, 0.198, 0.199, 0.200 s로 돌려가며 반복\n사후 지연 age_ms = round((응답 timestamp_s - source_timestamp_s) x 1000)",
+   "procedure": "1. S-LOCK 수행\n2. 각 시도 사이에 정상 B0(ts 생략) 1건을 보내 NORMAL로 복귀\n3. 시도를 반복해 age_ms=200 표본 3건 이상, age_ms=201 표본 3건 이상 확보 (최대 200회)\n4. 각 표본의 응답을 age_ms와 함께 기록",
+   "expected": "age_ms <= 200 표본: lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.FRESHNESS=VALID\nage_ms >= 201 표본: lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[], input_validity.FRESHNESS=STALE",
+   "pass_criteria": "age_ms=200 표본과 age_ms=201 표본이 각각 3건 이상 확보되고 모두 예상과 일치하면 합격. 표본 부족이면 '시험 불성립'(불합격 아님)으로 재시험. 하나라도 불일치면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "'>' 대신 '>=' 결함은 age_ms=200 표본이 STALE이 됨. 서버 시계 주입 불가에 따른 대체 방법(findings)"
+  },
+  {
+   "id": "STC-F-101",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "시간 반올림(DEF-04): 지연 200.0~200.5 ms 구간은 200으로 반올림되어 정상, 200.5~201.0 ms 구간은 201로 STALE인지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "위 지연 경계 케이스와 같은 방법으로 d를 0.1985~0.2005 s 범위에서 무작위로 바꿔 반복. 사후 지연 age_s = 응답 timestamp_s - source_timestamp_s",
+   "procedure": "1. S-LOCK 수행\n2. 시도 반복(최대 500회, 시도 사이 정상 B0로 복귀)\n3. age_s가 (0.2000, 0.2005) 구간인 표본 3건 이상, (0.2005, 0.2010) 구간인 표본 3건 이상 확보",
+   "expected": "age_s in (0.2000, 0.2005): FRESHNESS=VALID, state=NORMAL\nage_s in (0.2005, 0.2010): FRESHNESS=STALE, state=DEGRADED, reason_code=INPUT_STALE\n(0.2005 정확 경계는 판정 제외)",
+   "pass_criteria": "두 구간 표본이 각각 3건 이상 확보되고 모두 예상과 일치하면 합격. 표본 부족이면 '시험 불성립'. 불일치면 불합격.",
+   "techniques": [
+    "경계값 분석",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "올림(ceil) 결함은 첫 구간에서, 내림(floor) 결함은 둘째 구간에서 검출"
+  },
+  {
+   "id": "STC-F-102",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "source_timestamp_s가 미래 시각(T+10 s)이면 freshness를 판단할 수 없어 STALE(DEGRADED)로 처리되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "T = GET /api/status timestamp_s. B0{source_timestamp_s = T + 10.0}",
+   "procedure": "1. S-LOCK 수행\n2. T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[], input_validity.FRESHNESS=STALE",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "미래 시각을 지연 0 이하(정상)로 계산하는 결함 검출(음수 지연)"
+  },
+  {
+   "id": "STC-F-103",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "source_timestamp_s가 음수(-1.0, 범위 0.0 미만)이면 STALE(DEGRADED)로 처리되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{source_timestamp_s = -1.0}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[], input_validity.FRESHNESS=STALE",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-104",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "source_timestamp_s가 문자열('now')이면 STALE(DEGRADED)로 처리되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{source_timestamp_s = \"now\"}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[], input_validity.FRESHNESS=STALE",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-105",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "source_timestamp_s 생략 시 서버가 서버 시각으로 채워 정상(VALID) 평가되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0 (source_timestamp_s 생략)",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.FRESHNESS=VALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-106",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "안전 입력 그룹 무효와 지연이 동시이면 이유 코드가 INPUT_INVALID(우선)이고 두 유효성이 모두 표시되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "T = GET /api/status timestamp_s. B0{-crash_status, source_timestamp_s = T - 0.300}",
+   "procedure": "1. S-LOCK 수행\n2. T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[], input_validity.IF-002=INVALID, input_validity.FRESHNESS=STALE",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "4장 표 '지연과 동시면 INPUT_INVALID 우선'"
+  },
+  {
+   "id": "STC-F-107",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "복귀: 안전 입력 이상(IF-002 무효, 이어서 지연)이 해소되면 정상 평가로 돌아가고 직전 출력이 유지되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) B0{-crash_status}  (b) B0  (c) B0{source_timestamp_s = T-0.300}  (d) B0",
+   "procedure": "1. S-LOCK 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) T 읽고 전송\n5. (d) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[]\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n(c) lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[]\n(d) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "DEGRADED가 래치처럼 남는 결함 검출"
+  },
+  {
+   "id": "STC-F-108",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "DEGRADED 중에도 접근위험 TRUE(순위 3)는 해당 쪽 LOCK으로 적용되고 반대쪽은 직전 출력을 유지하는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{-crash_status, rear_left_approach_risk=true}",
+   "procedure": "1. S0 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=DEGRADED, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[], input_validity.IF-002=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-109",
+   "basis_ids": [
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "DEGRADED 중 해제 계열 규칙(시동 OFF, 화재)은 적용되지 않고 직전 LOCK이 유지되는지 확인(순위 4가 5·6보다 앞)",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) B0{-crash_status, ignition_on=false}  (b) B0{-crash_status, fire_detected=true}",
+   "procedure": "1. S-LOCK 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[]\n(b) lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "순위 4와 5, 6의 쌍. 화재 중 DEGRADED면 해제되지 않는 점은 findings"
+  },
+  {
+   "id": "STC-F-110",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "DEGRADED 중 잠금 계열 규칙(차속 3.0, ISOFIX, 잠금 명령)은 적용되지 않고 직전 RELEASE가 유지되는지 확인(순위 4가 7·8·9보다 앞)",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{-crash_status, vehicle_speed_kph=3.0}  (b) B0{-crash_status, isofix_left=true}  (c) B0{-crash_status, command=cmd(all,lock)}",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a)~(c) 모두 lock_left=RELEASE, lock_right=RELEASE, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "순위 4와 7, 8, 9의 쌍"
+  },
+  {
+   "id": "STC-F-111",
+   "basis_ids": [
+    "SWR-014",
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "스냅샷 수신 전 상태 조회: 7개 필드(+timestamp_s)가 모두 있고 초기값(DEF-06)이며 timestamp_s가 증가하는지 확인",
+   "preconditions": "시험 서버 신규 기동 (스냅샷 전송 전)",
+   "inputs": "GET /api/status 2회 (100 ms 간격)",
+   "procedure": "1. 서버 신규 기동 직후 GET /api/status\n2. 100 ms 대기\n3. GET /api/status 재호출",
+   "expected": "두 응답 모두: 키 집합에 lock_left, lock_right, state, input_validity, priority_reason, reason_code, notices, timestamp_s 포함.\nlock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\ninput_validity: 8개 키(IF-001, IF-002, IF-003, IF-004, IF-007, IF-008, IF-009, FRESHNESS) 각 값이 VALID/INVALID/STALE 중 하나.\n두 번째 timestamp_s > 첫 번째 timestamp_s",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "초기 상태에서 state=DEGRADED 등으로 시작하는 결함, 필드 누락 검출. 초기 input_validity 값은 SWRS에 없음(SWAD 3.2는 전부 INVALID)"
+  },
+  {
+   "id": "STC-F-112",
+   "basis_ids": [
+    "SWR-014"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "스냅샷 평가 후 상태 조회: 7개 필드가 모두 있고 형식이 맞으며 notices가 배열인지, POST 응답과 같은 내용인지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "B0{crash_status=\"PENDING\"} 전송 직후 GET /api/status",
+   "procedure": "1. S0 수행\n2. 전송, 응답 기록\n3. 즉시 GET /api/status",
+   "expected": "GET 응답: lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[CRASH_PENDING], input_validity의 8개 키 모두 VALID\nlock_left·lock_right·state·priority_reason·reason_code·notices가 POST 응답과 같음(timestamp_s는 증가 가능)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-113",
+   "basis_ids": [
+    "SWR-014"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "이유 코드와 priority_reason 매핑이 4장 표와 같은지 확인(결정 테이블: 12개 상황을 한 서버에서 순서대로 주입)",
+   "preconditions": "시험 서버 신규 기동 후 B0 1건 전송",
+   "inputs": "각 단계는 B0에서 지정 필드만 바꾼 스냅샷. 단계 사이 50 ms",
+   "procedure": "1. B0{vehicle_speed_kph=3.0}\n2. B0{command=cmd(all,unlock)}\n3. B0{command=cmd(all,lock)}\n4. B0{isofix_left=true}\n5. B0{fire_detected=true}\n6. B0{overtemperature_detected=true}\n7. B0{adult_present=true}\n8. B0{rear_left_approach_risk=true}\n9. B0{ignition_on=false}\n10. B0{-crash_status}\n11. B0{sensor_fault=true}\n12. B0{crash_status=\"CONFIRMED\"}",
+   "expected": "각 단계의 (priority_reason / reason_code):\n1) AUTO_LOCK / AUTO_LOCK_SPEED\n2) DRIVER_COMMAND / DRIVER_UNLOCK\n3) DRIVER_COMMAND / DRIVER_LOCK\n4) ISOFIX / ISOFIX\n5) FORCED_RELEASE / FIRE\n6) FORCED_RELEASE / OVERTEMP\n7) FORCED_RELEASE / ADULT_PRESENT\n8) APPROACH_RISK / APPROACH_RISK\n9) IGNITION_OFF / IGNITION_OFF\n10) DEGRADED / INPUT_INVALID\n11) SENSOR_FAULT / W_SENSOR_FAULT\n12) CRASH / CRASH_CONFIRMED\n(그 밖의 필드는 각 전용 케이스에서 판정. 이 케이스는 두 코드 필드만 판정)",
+   "pass_criteria": "12단계 모두 priority_reason, reason_code가 예상과 같으면 합격.",
+   "techniques": [
+    "결정 테이블",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "APPROACH_OVERRIDE, INPUT_STALE, NO_CHANGE는 SWR-006, 013, 003 케이스에서 판정"
+  },
+  {
+   "id": "STC-F-114",
+   "basis_ids": [
+    "SWR-015"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "정상 요청에 대해 4개 엔드포인트가 200과 올바른 JSON/HTML 형식으로 응답하는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "GET /, GET /api/status, GET /api/events, POST /api/snapshot(B0)",
+   "procedure": "1. S0 수행\n2. GET / 호출\n3. GET /api/status 호출\n4. GET /api/events 호출\n5. POST /api/snapshot (Content-Type: application/json, 본문 B0) 호출",
+   "expected": "GET /: HTTP 200, Content-Type이 text/html.\nGET /api/status: 200, JSON 객체, 키 8개(lock_left, lock_right, state, input_validity, priority_reason, reason_code, notices, timestamp_s).\nGET /api/events: 200, JSON 배열, 각 원소 키 8개(event_id, timestamp_s, lock_left, lock_right, state, priority_reason, reason_code, notices).\nPOST: 200, JSON 객체(status와 같은 8개 키)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-115",
+   "basis_ids": [
+    "SWR-015"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "POST /api/snapshot 본문이 JSON이 아닌 경우(JSON이 아닌 텍스트) HTTP 400이고 상태·이력이 변하지 않는지 확인",
+   "preconditions": "S-LOCK 수행 후 GET /api/events 건수 n 기록, GET /api/status 기록",
+   "inputs": "POST /api/snapshot, 본문: abc (본문 문자열)",
+   "procedure": "1. S-LOCK 수행, n과 status 기록\n2. 요청 전송\n3. 응답 확인\n4. GET /api/events, GET /api/status 재확인",
+   "expected": "응답 HTTP 400. 이후 GET /api/events 건수 = n (증가 없음). GET /api/status의 lock_left=LOCK, lock_right=LOCK, state=NORMAL 유지 (timestamp_s 제외 동일)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-116",
+   "basis_ids": [
+    "SWR-015"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "POST /api/snapshot 본문이 JSON이 아닌 경우(빈 본문(0 바이트)) HTTP 400이고 상태·이력이 변하지 않는지 확인",
+   "preconditions": "S-LOCK 수행 후 GET /api/events 건수 n 기록, GET /api/status 기록",
+   "inputs": "POST /api/snapshot, 본문: (본문 없음)",
+   "procedure": "1. S-LOCK 수행, n과 status 기록\n2. 요청 전송\n3. 응답 확인\n4. GET /api/events, GET /api/status 재확인",
+   "expected": "응답 HTTP 400. 이후 GET /api/events 건수 = n (증가 없음). GET /api/status의 lock_left=LOCK, lock_right=LOCK, state=NORMAL 유지 (timestamp_s 제외 동일)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "빈 본문을 {}로 간주해 200을 반환하는 결함 검출"
+  },
+  {
+   "id": "STC-F-117",
+   "basis_ids": [
+    "SWR-015"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "JSON 문법은 맞지만 NaN 리터럴을 포함한 본문이 400으로 거절되는지 확인",
+   "preconditions": "S0 수행, 이벤트 건수 n 기록",
+   "inputs": "본문: {\"vehicle_speed_kph\": NaN, \"gear\": \"P\"} (NaN은 JSON 표준 밖 리터럴)",
+   "procedure": "1. S0 수행, n 기록\n2. 요청 전송\n3. 응답과 GET /api/events 확인",
+   "expected": "응답 HTTP 400 (SWAD 4.3), 이벤트 건수 = n",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "SWRS는 'JSON이 아니면 400'. NaN 거절은 SWAD 4.3에 근거. 파이썬 json 기본 파서는 NaN을 수용함"
+  },
+  {
+   "id": "STC-F-118",
+   "basis_ids": [
+    "SWR-015"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "최상위가 객체가 아닌 JSON(배열 [])이 400으로 거절되는지 확인",
+   "preconditions": "S0 수행, 이벤트 건수 n 기록",
+   "inputs": "본문: []",
+   "procedure": "1. S0 수행, n 기록\n2. 요청 전송\n3. 응답과 GET /api/events 확인",
+   "expected": "응답 HTTP 400 (SWAD 4.3), 이벤트 건수 = n",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "최상위 배열에서 500(예외)이 나는 결함 검출. SWAD 4.3에 근거"
+  },
+  {
+   "id": "STC-F-119",
+   "basis_ids": [
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "fire_detected=true 단독 주입 시 같은 평가에 좌·우 RELEASE, 이유 FIRE인지 확인(좌·우 LOCK 상태에서)",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{fire_detected=true}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-120",
+   "basis_ids": [
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "overtemperature_detected=true 단독 주입 시 같은 평가에 좌·우 RELEASE, 이유 OVERTEMP인지 확인(좌·우 LOCK 상태에서)",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{overtemperature_detected=true}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=OVERTEMP, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-121",
+   "basis_ids": [
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "adult_present=true 단독 주입 시 같은 평가에 좌·우 RELEASE, 이유 ADULT_PRESENT인지 확인(좌·우 LOCK 상태에서)",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{adult_present=true}",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=ADULT_PRESENT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-122",
+   "basis_ids": [
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "여러 입력이 동시에 TRUE일 때 이유 코드가 FIRE > OVERTEMP > ADULT_PRESENT 순으로 선택되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) {overtemperature_detected, adult_present}=true  (b) {fire_detected, overtemperature_detected}=true  (c) {fire_detected, adult_present}=true  (d) 세 개 모두 true",
+   "procedure": "1. S-LOCK 수행\n2. (a)~(d) 순서대로 전송, 각 응답 확인",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=OVERTEMP, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]\n(c) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]\n(d) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "우선 순서를 역순(ADULT 우선)이나 열거 순서로 구현한 결함 검출"
+  },
+  {
+   "id": "STC-F-123",
+   "basis_ids": [
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "강제 해제 중 운전자 잠금 명령(새 입력)이 무시되고, 조건 해소 후 자동 재잠금 없이 RELEASE가 유지되며 이후 차속 3.0에서만 잠금되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{fire_detected=true, command=cmd(all,lock)}  (b) B0  (c) B0{vehicle_speed_kph=3.0}",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송\n4. (c) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n(c) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "(a)의 명령이 보류되었다가 (b)에서 적용되는 결함 검출(DEF-09: 명령은 1회성)"
+  },
+  {
+   "id": "STC-F-124",
+   "basis_ids": [
+    "SWR-018"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "왼쪽 ISOFIX TRUE이면 왼쪽만 LOCK(반대쪽 유지)이고, FALSE가 되어도 자동 해제하지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{isofix_left=true}  (b) B0",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]\n(b) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-125",
+   "basis_ids": [
+    "SWR-018"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "오른쪽 ISOFIX TRUE이면 오른쪽만 LOCK이고, 반대쪽(L) 상태 LOCK이었다면 유지되는지 확인(좌·우 매핑 교차 검출)",
+   "preconditions": "S-MIX 수행(L=LOCK, R=RELEASE)",
+   "inputs": "B0{isofix_right=true}",
+   "procedure": "1. S-MIX 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "S-MIX를 쓰므로 L의 유지(반대쪽 유지)도 함께 확인"
+  },
+  {
+   "id": "STC-F-126",
+   "basis_ids": [
+    "SWR-018",
+    "SWR-004"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "양쪽 ISOFIX TRUE인 동안 해제 명령이 거절되고, FALSE 이후에는 해제가 허용되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{isofix_left=true, isofix_right=true}  (b) B0{isofix_left=true, isofix_right=true, command=cmd(all,unlock)}  (c) B0  (d) B0{command=cmd(all,unlock)}",
+   "procedure": "1. S0 수행\n2. (a)~(d) 순서대로 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]\n(b) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[DRIVER_UNLOCK_REJECTED]\n(c) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n(d) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_UNLOCK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "(c)에서 FALSE 후에도 거절 상태가 남는 결함 검출"
+  },
+  {
+   "id": "STC-F-127",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=CONFIRMED, Sensor=T, RiskL=F, Stale=T, Ign=OFF, Fire=F, IsofixL=F, Speed=0.0, Cmd=NONE, Prev=LOCK",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", sensor_fault=true, source_timestamp_s=T-0.300, ignition_on=false}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-128",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=NONE, Sensor=F, RiskL=T, Stale=F, Ign=ON, Fire=T, IsofixL=F, Speed=3.0, Cmd=LOCK_ALL, Prev=RELEASE",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{rear_left_approach_risk=true, fire_detected=true, vehicle_speed_kph=3.0, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-129",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=CONFIRMED, Sensor=F, RiskL=F, Stale=F, Ign=OFF, Fire=F, IsofixL=T, Speed=0.0, Cmd=LOCK_ALL, Prev=RELEASE",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", ignition_on=false, isofix_left=true, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-130",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=NONE, Sensor=T, RiskL=T, Stale=T, Ign=OFF, Fire=T, IsofixL=T, Speed=3.0, Cmd=NONE, Prev=LOCK",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{sensor_fault=true, rear_left_approach_risk=true, source_timestamp_s=T-0.300, ignition_on=false, fire_detected=true, isofix_left=true, vehicle_speed_kph=3.0}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-131",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=NONE, Sensor=T, RiskL=T, Stale=T, Ign=ON, Fire=F, IsofixL=T, Speed=0.0, Cmd=LOCK_ALL, Prev=LOCK",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{sensor_fault=true, rear_left_approach_risk=true, source_timestamp_s=T-0.300, isofix_left=true, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-132",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=CONFIRMED, Sensor=F, RiskL=F, Stale=T, Ign=ON, Fire=T, IsofixL=T, Speed=0.0, Cmd=NONE, Prev=RELEASE",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", source_timestamp_s=T-0.300, fire_detected=true, isofix_left=true}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-133",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=CONFIRMED, Sensor=T, RiskL=T, Stale=F, Ign=ON, Fire=F, IsofixL=T, Speed=3.0, Cmd=NONE, Prev=LOCK",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", sensor_fault=true, rear_left_approach_risk=true, isofix_left=true, vehicle_speed_kph=3.0}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-134",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=NONE, Sensor=F, RiskL=F, Stale=F, Ign=OFF, Fire=F, IsofixL=T, Speed=3.0, Cmd=LOCK_ALL, Prev=LOCK",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{ignition_on=false, isofix_left=true, vehicle_speed_kph=3.0, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-135",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "우선순위 조합(PICT 행): Crash=CONFIRMED, Sensor=T, RiskL=T, Stale=T, Ign=ON, Fire=F, IsofixL=T, Speed=3.0, Cmd=LOCK_ALL, Prev=RELEASE",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", sensor_fault=true, rear_left_approach_risk=true, source_timestamp_s=T-0.300, isofix_left=true, vehicle_speed_kph=3.0, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 지연이 필요한 행이면 T(GET /api/status timestamp_s) 읽기\n3. 입력 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "페어와이즈(PICT)"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "PICT 모델 'SWR-019 우선순위' 결과 1행. 예상값은 SWR-019 표·DEF-10에서 도출(notices는 모든 행에서 []: 해제 명령·PENDING·무효 명령 없음)"
+  },
+  {
+   "id": "STC-F-136",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-007",
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 1과 3: CONFIRMED와 왼쪽 접근위험 동시 -> 왼쪽 접근위험 LOCK이 충돌 해제를 이기지 못하고 좌·우 RELEASE",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", rear_left_approach_risk=true}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "접근위험이 충돌 해제보다 앞서는 결함(L=LOCK) 검출"
+  },
+  {
+   "id": "STC-F-137",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-007",
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 1과 6: CONFIRMED와 화재 동시 -> priority_reason이 CRASH(FORCED_RELEASE 아님)",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{crash_status=\"CONFIRMED\", fire_detected=true}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "출력이 같아 이유 코드로만 구분되는 쌍"
+  },
+  {
+   "id": "STC-F-138",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-021",
+    "SWR-005"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 2와 3: 센서 고장과 왼쪽 접근위험 동시 -> SWR-021 문구대로 직전 출력 유지(접근위험 LOCK 미적용)",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{sensor_fault=true, rear_left_approach_risk=true}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "SWR-005(위험 TRUE면 LOCK)와 SWR-021(센서 고장 중 접근위험 변화에도 유지)의 충돌 지점. 안전 관점 의문은 findings"
+  },
+  {
+   "id": "STC-F-139",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-021",
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 2와 4: 센서 고장과 지연 동시 -> 상태 FAULT가 DEGRADED보다 우선",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{sensor_fault=true, source_timestamp_s=T-0.300}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-140",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-005",
+    "SWR-020"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 3과 5: 왼쪽 접근위험과 시동 OFF 동시 -> 왼쪽 LOCK, 오른쪽 RELEASE, 상태 OFF",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{rear_left_approach_risk=true, ignition_on=false}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=OFF, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "쪽별로 결과가 갈리는 쌍. 상태는 DEF-10(OVERRIDE 없음, OFF)"
+  },
+  {
+   "id": "STC-F-141",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-005",
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 3과 6: 왼쪽 접근위험과 화재 동시 -> 왼쪽 LOCK, 오른쪽 RELEASE",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{rear_left_approach_risk=true, fire_detected=true}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "화재 해제가 위험 쪽까지 RELEASE하는 결함 검출('남은 쪽' 규칙)"
+  },
+  {
+   "id": "STC-F-142",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-005",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 3과 8: 왼쪽 접근위험과 차속 3.0 동시 -> 좌·우 LOCK, priority_reason은 APPROACH_RISK",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{rear_left_approach_risk=true, vehicle_speed_kph=3.0}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "출력이 같아 이유 코드로만 구분되는 쌍"
+  },
+  {
+   "id": "STC-F-143",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-020",
+    "SWR-017"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 5와 6: 시동 OFF와 화재 동시 -> priority_reason IGNITION_OFF, 상태 OFF",
+   "preconditions": "S-LOCK 수행 (직전 출력 L=LOCK, R=LOCK)",
+   "inputs": "B0{ignition_on=false, fire_detected=true}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "출력이 같아 이유 코드로만 구분되는 쌍"
+  },
+  {
+   "id": "STC-F-144",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-020",
+    "SWR-003",
+    "SWR-001"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 5와 8, 9: 시동 OFF에 차속 3.0과 잠금 명령 동시 -> 좌·우 RELEASE(시동 OFF가 이김)",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{ignition_on=false, vehicle_speed_kph=3.0, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "주행 중 시동 OFF 해제는 SWRS 순위 그대로(findings 참조)"
+  },
+  {
+   "id": "STC-F-145",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-017",
+    "SWR-018",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 6, 7, 8, 9: 화재와 왼쪽 ISOFIX, 차속 3.0, 잠금 명령 동시 -> 좌·우 RELEASE, FORCED_RELEASE",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{fire_detected=true, isofix_left=true, vehicle_speed_kph=3.0, command=cmd(all,lock)}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=FORCED_RELEASE, reason_code=FIRE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "'QM 사이에서 해제가 잠금보다 앞'"
+  },
+  {
+   "id": "STC-F-146",
+   "basis_ids": [
+    "SWR-019",
+    "SWR-018",
+    "SWR-003"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "순위 7과 8: 왼쪽 ISOFIX와 차속 3.0 동시 -> 좌·우 LOCK, priority_reason은 ISOFIX(더 높은 순위)",
+   "preconditions": "S0 수행 (직전 출력 L=RELEASE, R=RELEASE)",
+   "inputs": "B0{isofix_left=true, vehicle_speed_kph=3.0}",
+   "procedure": "1. 사전조건 수행\n2. 필요하면 T 읽기\n3. 전송\n4. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=ISOFIX, reason_code=ISOFIX, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "priority_reason을 마지막에 평가된 규칙으로 덮는 결함 검출"
+  },
+  {
+   "id": "STC-F-147",
+   "basis_ids": [
+    "SWR-020"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "시동 OFF 첫 평가에 좌·우 RELEASE, 상태 OFF, 이유 IGNITION_OFF이고, ON 복귀 시 출력이 유지되며 OFF 상태가 남지 않는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "(a) B0{ignition_on=false}  (b) B0",
+   "procedure": "1. S-LOCK 수행\n2. (a) 전송, 응답 확인(다음 평가를 기다리지 않음)\n3. (b) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-148",
+   "basis_ids": [
+    "SWR-020",
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "같은 스냅샷에 시동 OFF와 CONFIRMED가 있으면 초기화 후 래치가 다시 설정되어, 시동 ON 복귀 후에도 EMERGENCY가 유지되고 다음 시동 OFF에서 해제되는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{ignition_on=false, crash_status=\"CONFIRMED\"}  (b) B0  (c) B0{ignition_on=false}  (d) B0",
+   "procedure": "1. S0 수행\n2. (a)~(d) 순서대로 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]\n(b) 래치 유지: lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]\n(c) lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]\n(d) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "초기화와 설정 순서가 뒤바뀐 결함은 (b)가 NORMAL이 됨"
+  },
+  {
+   "id": "STC-F-149",
+   "basis_ids": [
+    "SWR-020",
+    "SWR-007",
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "래치 중 시동 OFF 신호가 IF-009 무효(sensor_fault 누락)이면 래치가 해제되지 않는지 확인",
+   "preconditions": "S-LOCK 수행 후 B0{crash_status=\"CONFIRMED\"} 전송 (EMERGENCY)",
+   "inputs": "(a) B0{ignition_on=false, -sensor_fault}  (b) B0{ignition_on=false}",
+   "procedure": "1. 사전조건 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) IF-009가 무효이므로 초기화하지 않음: lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "무효 신호를 시동 OFF로 해석해 래치를 해제하는 결함 검출. SWRS: 'IF-009가 유효하고 ignition_on = FALSE이면'"
+  },
+  {
+   "id": "STC-F-150",
+   "basis_ids": [
+    "SWR-020",
+    "SWR-021",
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "래치 중 시동 OFF와 센서 고장이 같은 스냅샷이면 래치는 초기화되고 센서 고장 규칙(FAULT)이 적용되며, 고장 해소 후 래치가 없는지 확인",
+   "preconditions": "S-LOCK 수행 후 B0{crash_status=\"CONFIRMED\"} 전송 (EMERGENCY, 좌·우 RELEASE)",
+   "inputs": "(a) B0{ignition_on=false, sensor_fault=true}  (b) B0",
+   "procedure": "1. 사전조건 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) 초기화 후 순위 2: lock_left=RELEASE, lock_right=RELEASE, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "센서 고장 시 초기화를 건너뛰어 (b)에서 EMERGENCY가 남는 결함 검출"
+  },
+  {
+   "id": "STC-F-151",
+   "basis_ids": [
+    "SWR-020"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "시동 OFF 중 들어온 잠금 명령(새 입력)이 무시되고, ON 복귀 후에도 명령이 보류되지 않는지 확인",
+   "preconditions": "S0 수행",
+   "inputs": "(a) B0{ignition_on=false, command=cmd(all,lock)}  (b) B0",
+   "procedure": "1. S0 수행\n2. (a) 전송\n3. (b) 전송",
+   "expected": "(a) lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]\n(b) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-152",
+   "basis_ids": [
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "sensor_fault TRUE 첫 평가에 직전 출력(L=LOCK, R=RELEASE 혼합)이 그대로 유지되고 FAULT, W_SENSOR_FAULT인지 확인",
+   "preconditions": "S-MIX 수행 (L=LOCK, R=RELEASE)",
+   "inputs": "B0{sensor_fault=true}",
+   "procedure": "1. S-MIX 수행\n2. 전송\n3. 응답 확인(다음 평가를 기다리지 않음)",
+   "expected": "lock_left=LOCK, lock_right=RELEASE, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "혼합 상태를 쓰므로 안전측(전부 LOCK)·기본값(전부 RELEASE) 강제 결함을 한 번에 검출"
+  },
+  {
+   "id": "STC-F-153",
+   "basis_ids": [
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "센서 고장 TRUE 중 차속 3.0, 잠금·해제 명령, 오른쪽 접근위험, 화재 입력이 와도 출력이 직전 상태로 유지되는지 확인",
+   "preconditions": "S-MIX 수행",
+   "inputs": "모두 sensor_fault=true 포함: (a) {vehicle_speed_kph=3.0} (b) {command=cmd(all,lock)} (c) {command=cmd(all,unlock)} (d) {rear_right_approach_risk=true} (e) {fire_detected=true}",
+   "procedure": "1. S-MIX 수행\n2. (a)~(e) 순서대로 전송(명령이 있는 단계 사이에는 명령 없는 B0{sensor_fault=true} 1건), 각 응답 확인",
+   "expected": "(a)~(e) 모두 lock_left=LOCK, lock_right=RELEASE, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "결정 테이블",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "(d)는 SWR-005와 충돌하는 지점(findings)"
+  },
+  {
+   "id": "STC-F-154",
+   "basis_ids": [
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "센서 고장 중 받은 명령은 적용되지 않고 보류되지도 않으며, 고장 해소 후 정상 평가(차속 3.0 자동 잠금)가 재개되는지 확인",
+   "preconditions": "S-MIX 수행",
+   "inputs": "(a) B0{sensor_fault=true, command=cmd(all,unlock)}  (b) B0  (c) B0{vehicle_speed_kph=3.0}",
+   "procedure": "1. S-MIX 수행\n2. (a)~(c) 순서대로 전송",
+   "expected": "(a) lock_left=LOCK, lock_right=RELEASE, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]\n(b) lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[] (보류된 해제 명령이 적용되지 않음)\n(c) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=AUTO_LOCK, reason_code=AUTO_LOCK_SPEED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "FAULT가 해소 후에도 남거나 명령이 보류 적용되는 결함 검출"
+  },
+  {
+   "id": "STC-F-155",
+   "basis_ids": [
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "입력 중단 감시 경계: 마지막 스냅샷 후 지연이 200 ms 이하이면 NORMAL, 201 ms 이상이 되는 첫 조회에서 DEGRADED(INPUT_STALE)로 바뀌고 300 ms 이내인지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "T = GET /api/status timestamp_s. B0{source_timestamp_s = T} 전송 후 입력 중단, GET /api/status를 10 ms 간격으로 폴링(각 폴링 응답의 timestamp_s 기록). age_ms = round((응답 timestamp_s - T) x 1000)",
+   "procedure": "1. S-LOCK 수행\n2. T 읽기\n3. B0{source_timestamp_s=T} 전송\n4. age_ms가 350 이상이 될 때까지 10 ms 간격으로 GET /api/status 폴링하며 (age_ms, state, FRESHNESS) 기록",
+   "expected": "age_ms <= 200 인 모든 폴링: lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], FRESHNESS=VALID\nage_ms >= 201 인 첫 폴링(age_ms는 201~215 범위): lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[], FRESHNESS=STALE\n이후 폴링도 DEGRADED 유지",
+   "pass_criteria": "age_ms <= 200 구간에 DEGRADED가 한 번도 없고, 첫 DEGRADED의 age_ms가 201 이상 300 이하이면 합격. 폴링 간격 때문에 age_ms=200/201 구분이 흐려지는 경우는 지연 경계 케이스(STC-F-100)로 판정.",
+   "techniques": [
+    "경계값 분석",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "GET /api/status가 tick 1회를 수행하는 것(SWR-022)에 의존"
+  },
+  {
+   "id": "STC-F-156",
+   "basis_ids": [
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "상태 조회 없이 서버 tick 스레드만으로 입력 중단이 감지되어 이벤트로 기록되는지 확인(감지 시각이 마지막 스냅샷 후 200 ms 초과 300 ms 이하)",
+   "preconditions": "시험 서버 신규 기동",
+   "inputs": "T = GET /api/status의 timestamp_s. B0{source_timestamp_s = T} 전송 후 500 ms 동안 서버에 어떤 요청도 보내지 않음",
+   "procedure": "1. 서버 신규 기동, GET /api/status로 T 읽기\n2. B0{source_timestamp_s=T} 전송\n3. 500 ms 대기(요청 없음)\n4. GET /api/events 확인",
+   "expected": "이벤트 2건. 2번 이벤트: state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, 0.200 < (timestamp_s - T) <= 0.300",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "고장 주입",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "tick 주기(50 ms)를 간접 확인. tick 스레드가 없고 조회 때만 tick을 수행하는 결함 검출"
+  },
+  {
+   "id": "STC-F-157",
+   "basis_ids": [
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "입력이 재개되면(새 유효 스냅샷) DEGRADED에서 NORMAL로 복귀하고 직전 출력이 유지되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0 전송 후 400 ms 중단, 이어서 B0 전송",
+   "procedure": "1. S-LOCK 수행\n2. 400 ms 대기(요청 없음)\n3. GET /api/status로 DEGRADED 확인\n4. B0 전송",
+   "expected": "3) lock_left=LOCK, lock_right=LOCK, state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_STALE, notices=[]\n4) lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-158",
+   "basis_ids": [
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "첫 스냅샷 전에는 입력 중단 감시를 하지 않는지(DEF-06) 확인",
+   "preconditions": "시험 서버 신규 기동 (스냅샷 전송 전)",
+   "inputs": "서버 기동 후 1.5 s 동안 GET /api/status 폴링(100 ms 간격), 이후 B0 전송",
+   "procedure": "1. 서버 신규 기동\n2. 1.5 s간 100 ms 간격으로 GET /api/status\n3. GET /api/events\n4. B0 전송",
+   "expected": "2) 모든 응답 lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n3) 빈 배열 [] (이벤트 0건)\n4) lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "기동 시각을 마지막 입력으로 보고 DEGRADED(INPUT_STALE)가 되는 결함 검출"
+  },
+  {
+   "id": "STC-F-159",
+   "basis_ids": [
+    "SWR-022",
+    "SWR-007"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "입력 중단 중에도 충돌 래치 상태(EMERGENCY)가 DEGRADED로 바뀌지 않는지 확인(DEF-10 순서)",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{crash_status=\"CONFIRMED\"} 전송 후 400 ms 중단",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 400 ms 대기\n4. GET /api/status 확인",
+   "expected": "lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-160",
+   "basis_ids": [
+    "SWR-022",
+    "SWR-021"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "입력 중단 중에도 센서 고장 상태(FAULT)가 DEGRADED로 바뀌지 않고 출력이 유지되는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{sensor_fault=true} 전송 후 400 ms 중단",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 400 ms 대기\n4. GET /api/status 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=FAULT, priority_reason=SENSOR_FAULT, reason_code=W_SENSOR_FAULT, notices=[]",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "상태 전이",
+    "고장 주입"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-161",
+   "basis_ids": [
+    "SWR-022"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "공칭 입력 주기보다 느린 150 ms 주기 입력이 200 ms 한계 이내이면 5 s 동안 DEGRADED 오탐이 없는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0를 150 ms 간격으로 5 s(약 33건) 전송하면서, 그 사이 GET /api/status를 30 ms 간격으로 폴링",
+   "procedure": "1. S-LOCK 수행\n2. 5 s 동안 B0 150 ms 간격 전송 + 30 ms 간격 GET /api/status\n3. GET /api/events 확인",
+   "expected": "모든 POST·GET 응답이 lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]\n이벤트에 state=DEGRADED인 항목 없음",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "tick 감시 임계를 지연 판정과 다르게 구현해 오탐하는 결함 검출"
+  },
+  {
+   "id": "STC-F-162",
+   "basis_ids": [
+    "SWR-025"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "시뮬레이터 화면에서 모든 입력(IF-001~004, 007~009)을 설정해 전송하면 /api/status와 화면 표시가 같은지 확인",
+   "preconditions": "시험 서버 기동, 브라우저로 http://127.0.0.1:8000/ 접속(화면 로드 성공)",
+   "inputs": "화면에서 설정: 차속 3.0, 기어 D, 충돌 NONE, 후좌 접근위험 true, 후우 접근위험 false, 명령 없음, 화재 false, 과온 false, 성인 false, ISOFIX 좌 false, 우 true, 시동 ON, 센서 고장 false",
+   "procedure": "1. 화면에서 위 값을 입력 컨트롤로 설정\n2. 전송 동작 실행\n3. 화면의 상태 표시 확인\n4. GET /api/status 응답과 비교",
+   "expected": "화면과 /api/status 모두: lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]\n화면에 입력 필드 14종(차속, 기어, 충돌, 접근위험 좌·우, 명령 side/action/source, 화재, 과온, 성인, ISOFIX 좌·우, 시동, 센서 고장)이 모두 있고 각각 설정 가능",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석",
+    "결정 테이블"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "화면 컨트롤 명세가 없어 필드 존재 여부를 SWRS 3.6 표 기준으로 확인(findings)"
+  },
+  {
+   "id": "STC-F-163",
+   "basis_ids": [
+    "SWR-025"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "화면에서 운전자 명령(오른쪽, lock, mobile_app)과 시동 OFF를 설정해 전송하고, 최근 결정 이력 표시가 /api/events와 일치하는지 확인",
+   "preconditions": "시험 서버 신규 기동, 화면 접속",
+   "inputs": "(1) 기준값 전송 (2) 명령: 우측 lock mobile_app 전송 (3) 시동 OFF 전송",
+   "procedure": "1. 화면에서 기준값(B0와 같은 값) 전송\n2. 명령 side=right, action=lock, source=mobile_app 설정 후 전송\n3. 시동 OFF로 바꾸고 명령 해제 후 전송\n4. 화면의 결정 이력 표시와 GET /api/events 비교",
+   "expected": "(2) 후 화면과 status: lock_left=RELEASE, lock_right=LOCK, state=NORMAL, priority_reason=DRIVER_COMMAND, reason_code=DRIVER_LOCK, notices=[]\n(3) 후: lock_left=RELEASE, lock_right=RELEASE, state=OFF, priority_reason=IGNITION_OFF, reason_code=IGNITION_OFF, notices=[]\n이력 표시: event_id 1,2,3 순서로 3건이 GET /api/events와 같은 값(lock_left, lock_right, state, reason_code)으로 표시",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-164",
+   "basis_ids": [
+    "SWR-026"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "정의 외 최상위 필드(camera_image)가 있는 요청이 400으로 거절되고, 같은 요청의 유효 입력(차속 3.0)도 처리·저장되지 않는지 확인",
+   "preconditions": "S0 수행, 이벤트 건수 n 기록",
+   "inputs": "B0{vehicle_speed_kph=3.0, camera_image=\"AAAA\"}",
+   "procedure": "1. S0 수행, n 기록\n2. 전송\n3. 응답 확인\n4. GET /api/status, GET /api/events 확인",
+   "expected": "응답 HTTP 400. GET /api/status: lock_left=RELEASE, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]. 이벤트 건수 = n (증가 없음)",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "필드를 무시하고 처리(LOCK)하거나 거절하면서 일부 처리하는 결함 검출"
+  },
+  {
+   "id": "STC-F-165",
+   "basis_ids": [
+    "SWR-026"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "command 객체 안의 정의 외 필드(driver_id)가 400으로 거절되고 처리되지 않는지 확인",
+   "preconditions": "S-MIX 수행, 이벤트 건수 n 기록",
+   "inputs": "B0{command={side:\"all\", action:\"lock\", source:\"avn\", driver_id:\"d1\"}}",
+   "procedure": "1. S-MIX 수행, n 기록\n2. 전송\n3. 응답과 GET /api/status, GET /api/events 확인",
+   "expected": "응답 HTTP 400. GET /api/status: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[]. 이벤트 건수 = n",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "검사를 최상위에만 하는 결함 검출(명령이 적용되어 R=LOCK이 됨)"
+  },
+  {
+   "id": "STC-F-166",
+   "basis_ids": [
+    "SWR-026"
+   ],
+   "category": "functional",
+   "suggested": true,
+   "objective": "정의 외 필드 이름이 정의 필드와 철자·대소문자만 다른 경우(Ignition_On)도 400으로 거절되는지 확인",
+   "preconditions": "S0 수행, 이벤트 건수 n 기록",
+   "inputs": "B0에서 ignition_on 키를 Ignition_On으로 바꾼 본문",
+   "procedure": "1. S0 수행, n 기록\n2. 전송\n3. 응답과 GET /api/events 확인",
+   "expected": "응답 HTTP 400 (IF-009 INVALID로 200 처리하지 않음). 이벤트 건수 = n",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-F-167",
+   "basis_ids": [
+    "SWR-026",
+    "SWR-013"
+   ],
+   "category": "functional",
+   "suggested": false,
+   "objective": "성인 존재는 불리언으로만 받음: adult_present에 정수 1을 보내면 IF-007 무효로 처리되어 강제 해제가 일어나지 않는지 확인",
+   "preconditions": "S-LOCK 수행",
+   "inputs": "B0{adult_present=1} (JSON 정수)",
+   "procedure": "1. S-LOCK 수행\n2. 전송\n3. 응답 확인",
+   "expected": "lock_left=LOCK, lock_right=LOCK, state=NORMAL, priority_reason=NONE, reason_code=NO_CHANGE, notices=[], input_validity.IF-007=INVALID",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "동치 분할",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "1을 TRUE로 해석하는 결함(Python 정수/불리언) 검출"
+  },
+  {
+   "id": "STC-NF-001",
+   "basis_ids": [
+    "SWR-023"
+   ],
+   "category": "non-functional",
+   "suggested": false,
+   "objective": "1회 평가 처리 시간이 10 ms 이하인지 대표 입력 1,000회로 측정(HTTP 왕복 시간으로 상한 측정)",
+   "preconditions": "시험 서버 기동 후 워밍업 100회(결과 제외), 시험 PC에 다른 부하 작업 없음, 루프백(127.0.0.1)",
+   "inputs": "대표 입력 5종을 순환 전송(B0, B0{speed=3.0}, B0{riskL=true}, B0{isofix_left=true}, B0{crash=\"PENDING\"}) 총 1,000회, 각 요청의 왕복 시간 측정(time.perf_counter)",
+   "procedure": "1. 서버 기동, 워밍업 100회\n2. 1,000회 전송하며 각 POST 응답까지의 시간(ms) 기록, 요청 사이 20 ms 간격\n3. 최댓값, 99.9 백분위, 평균 계산",
+   "expected": "최댓값 <= 10 ms (왕복 시간은 처리 시간의 상한이므로 이를 넘지 않으면 SWR-023 충족)",
+   "pass_criteria": "왕복 시간 최댓값 <= 10 ms이면 합격. 초과하면 즉시 불합격이 아니라 초과 표본을 3회 재측정해 OS 지터인지 확인하고, 재현되면 불합격으로 보고.",
+   "techniques": [
+    "경계값 분석",
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "순수 처리 시간은 HTTP 경유로 분리할 수 없음(findings)"
+  },
+  {
+   "id": "STC-NF-002",
+   "basis_ids": [
+    "SWR-016"
+   ],
+   "category": "non-functional",
+   "suggested": false,
+   "objective": "같은 입력 벡터를 서버 1,000회 재기동 후 재생했을 때 공개 결과(시계 의존 필드 제외)의 SHA-256 해시가 모두 같은지 확인(결정론)",
+   "preconditions": "자동화 스크립트 준비. PYTHONHASHSEED는 지정하지 않음(기동마다 달라짐)",
+   "inputs": "입력 벡터 V(20건, 요구사항 전 규칙을 지나감): B0, 속도 3.0, 위험 L, 해제 요청, 재요청, 명령 각종, PENDING, CONFIRMED, 시동 OFF 등. 각 반복은 서버 신규 기동 후 V를 50 ms 간격으로 전송",
+   "procedure": "1. 서버 신규 기동\n2. V를 순서대로 POST, 각 응답에서 timestamp_s 제거 후 직렬화(키 정렬)\n3. GET /api/events 결과에서 timestamp_s 제거 후 직렬화\n4. 응답·이벤트 전체를 SHA-256 해시\n5. 1~4를 1,000회 반복(총 소요 약 20분), 해시 집합 크기 확인",
+   "expected": "해시 집합 크기 = 1 (1,000회 모두 같은 해시). notices 배열의 순서도 같음",
+   "pass_criteria": "1,000개 해시가 모두 같으면 합격. 하나라도 다르면 불합격(차이 난 필드를 보고).",
+   "techniques": [
+    "요구사항 분석",
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "고정 시계 주입이 불가해 timestamp_s를 제외. 서버 재기동마다 해시 시드·집합 순서가 달라지므로 집합 순서 의존 결함을 검출(findings)"
+  },
+  {
+   "id": "STC-NF-003",
+   "basis_ids": [
+    "SWR-024"
+   ],
+   "category": "non-functional",
+   "suggested": false,
+   "objective": "Python 3.12에서 서버가 기동·동작하고 런타임 의존성이 표준 라이브러리뿐인지 확인",
+   "preconditions": "Python 3.12 설치 확인(C:\\Users\\user\\AppData\\Local\\Programs\\Python\\Python312), 외부 패키지가 설치되지 않은 새 가상환경(venv)",
+   "inputs": "python3.12로 python -m child_lock.web --port 8000 실행, 프로젝트 설정의 dependencies 확인",
+   "procedure": "1. 새 venv 생성(Python 3.12), 외부 패키지 설치 없이 프로젝트를 설치\n2. 서버 기동\n3. S0와 SWR-005 대표 입력(B0{rear_left_approach_risk=true}) 전송\n4. pyproject.toml의 [project] dependencies 확인\n5. pip list로 설치 패키지 확인",
+   "expected": "서버가 오류 없이 기동하고 3) 응답: lock_left=LOCK, lock_right=RELEASE, state=NORMAL, priority_reason=APPROACH_RISK, reason_code=APPROACH_RISK, notices=[]. dependencies = [] (비어 있음). pip list에 프로젝트 자신 외 런타임 패키지 없음(pip, setuptools 제외)",
+   "pass_criteria": "기동·응답 성공 및 의존성 목록이 비어 있으면 합격.",
+   "techniques": [
+    "요구사항 분석"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": ""
+  },
+  {
+   "id": "STC-NF-004",
+   "basis_ids": [
+    "SWR-022",
+    "SWR-013"
+   ],
+   "category": "non-functional",
+   "suggested": false,
+   "objective": "입력 중단 고장 주입을 20회 반복해 감지 시간이 매번 200 ms 초과 300 ms 이하인지 확인",
+   "preconditions": "서버 기동",
+   "inputs": "20회 반복: B0{source_timestamp_s=T} 전송 후 요청 없이 500 ms 대기, GET /api/events 마지막 이벤트 확인, 이어서 B0로 복구",
+   "procedure": "1. 반복마다: T 읽기\n2. B0 전송\n3. 500 ms 대기(요청 없음)\n4. GET /api/events의 마지막 이벤트가 DEGRADED/INPUT_STALE이고 timestamp_s - T 계산\n5. B0 전송(복구, state NORMAL 확인)",
+   "expected": "20회 모두: 마지막 이벤트 state=DEGRADED, reason_code=INPUT_STALE, 0.200 < (timestamp_s - T) <= 0.300; 복구 응답 state=NORMAL",
+   "pass_criteria": "20/20 충족하면 합격. 1회라도 300 ms 초과 또는 200 ms 이하 감지는 불합격.",
+   "techniques": [
+    "고장 주입",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "OEM-SR-003 입력 중단 후 300 ms 이내 DEGRADED. 최악치는 tick 50 ms 주기 + 200 ms 임계 = 250 ms 근처"
+  },
+  {
+   "id": "STC-NF-005",
+   "basis_ids": [
+    "SWR-007",
+    "SWR-023"
+   ],
+   "category": "non-functional",
+   "suggested": false,
+   "objective": "충돌 CONFIRMED 반응 시간: 입력 후 같은 평가(응답)에 RELEASE가 반영되고 응답까지 300 ms 이내인지 100회 확인",
+   "preconditions": "서버 기동, 루프백",
+   "inputs": "100회 반복: B0{command=cmd(all,lock)}, B0, B0{crash_status=\"CONFIRMED\"}(측정), B0{ignition_on=false}(래치 해제), B0",
+   "procedure": "1. 반복마다: 잠금 명령으로 L,R=LOCK 만들기\n2. B0{crash_status=\"CONFIRMED\"} 전송, 전송 전후 시각으로 응답 시간 측정\n3. 응답 확인\n4. 시동 OFF로 래치 해제 후 B0로 복귀",
+   "expected": "100회 모두: lock_left=RELEASE, lock_right=RELEASE, state=EMERGENCY, priority_reason=CRASH, reason_code=CRASH_CONFIRMED, notices=[] 이고 응답 시간 <= 300 ms (OEM-SR-001, 같은 평가 반영)",
+   "pass_criteria": "100/100 충족하면 합격.",
+   "techniques": [
+    "고장 주입",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "SWR-023 근거: 300 ms는 1회 평가 반영으로 만족(DEF-02)"
+  },
+  {
+   "id": "STC-NF-006",
+   "basis_ids": [
+    "SWR-013",
+    "SWR-023"
+   ],
+   "category": "non-functional",
+   "suggested": false,
+   "objective": "안전 입력 무효 반응 시간: IF-002 무효 입력 후 같은 평가(응답)에 DEGRADED가 반영되고 100 ms 이내인지 100회 확인",
+   "preconditions": "서버 기동, 루프백",
+   "inputs": "100회 반복: B0, B0{-crash_status}(측정), B0",
+   "procedure": "1. 반복마다: B0 전송\n2. B0{-crash_status} 전송, 응답 시간 측정\n3. 응답 확인\n4. B0 전송(복구)",
+   "expected": "100회 모두: state=DEGRADED, priority_reason=DEGRADED, reason_code=INPUT_INVALID 이고 응답 시간 <= 100 ms (OEM-SR-003, 같은 평가 반영)",
+   "pass_criteria": "100/100 충족하면 합격.",
+   "techniques": [
+    "고장 주입",
+    "경계값 분석"
+   ],
+   "environment": "",
+   "asil": "B",
+   "priority": "High",
+   "notes": "SWR-023 근거: 100 ms 요구"
+  },
+  {
+   "id": "STC-NF-007",
+   "basis_ids": [
+    "SWR-010",
+    "SWR-015"
+   ],
+   "category": "non-functional",
+   "suggested": true,
+   "objective": "동시 요청(4개 클라이언트가 동시에 POST)에서도 event_id가 중복·누락 없이 연속이고 모든 응답이 200인지 확인",
+   "preconditions": "시험 서버 신규 기동",
+   "inputs": "4개 스레드가 각각 B0 200건(총 800건)을 동시에 POST (요청 사이 간격 없음)",
+   "procedure": "1. 서버 신규 기동\n2. 4개 클라이언트 동시 전송\n3. 모든 응답 코드 집계\n4. GET /api/events 확인",
+   "expected": "모든 응답 HTTP 200. GET /api/events: 100건, event_id 701..800 연속 오름차순(중복·누락 없음). 응답의 timestamp_s들이 이벤트와 모순 없음",
+   "pass_criteria": "모든 단계의 관찰값이 예상 출력과 일치하면 합격. notices는 집합으로 비교(순서 무관). 하나라도 다르면 불합격.",
+   "techniques": [
+    "WoW 검증"
+   ],
+   "environment": "",
+   "asil": "QM",
+   "priority": "Medium",
+   "notes": "안전 런타임 잠금 부재로 event_id 중복/누락, 500 오류가 나는 결함 검출"
+  }
+ ],
+ "pict_models": [
+  {
+   "name": "SWR-001 명령 조합",
+   "basis_ids": [
+    "SWR-001"
+   ],
+   "model": "Source: physical_button, avn, voice, mobile_app\nSide: left, right, all\nAction: lock, unlock\n",
+   "options": "/o:2 /r:1",
+   "result_tsv": "Source\tSide\tAction\navn\tright\tlock\nvoice\tall\tunlock\nmobile_app\tall\tlock\navn\tleft\tunlock\nphysical_button\tall\tunlock\nmobile_app\tright\tunlock\navn\tall\tlock\nmobile_app\tleft\tlock\nvoice\tleft\tlock\nvoice\tright\tunlock\nphysical_button\tright\tlock\nphysical_button\tleft\tunlock\n",
+   "test_case_ids": [
+    "STC-F-001",
+    "STC-F-002",
+    "STC-F-003",
+    "STC-F-004",
+    "STC-F-005",
+    "STC-F-006",
+    "STC-F-007",
+    "STC-F-008",
+    "STC-F-009",
+    "STC-F-010",
+    "STC-F-011",
+    "STC-F-012"
+   ]
+  },
+  {
+   "name": "SWR-019 우선순위",
+   "basis_ids": [
+    "SWR-019"
+   ],
+   "model": "Crash: NONE, CONFIRMED\nSensor: F, T\nRiskL: F, T\nStale: F, T\nIgn: ON, OFF\nFire: F, T\nIsofixL: F, T\nSpeed: 0.0, 3.0\nCmd: NONE, LOCK_ALL\nPrev: RELEASE, LOCK\n",
+   "options": "/o:2 /r:1",
+   "result_tsv": "Crash\tSensor\tRiskL\tStale\tIgn\tFire\tIsofixL\tSpeed\tCmd\tPrev\nCONFIRMED\tT\tF\tT\tOFF\tF\tF\t0.0\tNONE\tLOCK\nNONE\tF\tT\tF\tON\tT\tF\t3.0\tLOCK_ALL\tRELEASE\nCONFIRMED\tF\tF\tF\tOFF\tF\tT\t0.0\tLOCK_ALL\tRELEASE\nNONE\tT\tT\tT\tOFF\tT\tT\t3.0\tNONE\tLOCK\nNONE\tT\tT\tT\tON\tF\tT\t0.0\tLOCK_ALL\tLOCK\nCONFIRMED\tF\tF\tT\tON\tT\tT\t0.0\tNONE\tRELEASE\nCONFIRMED\tT\tT\tF\tON\tF\tT\t3.0\tNONE\tLOCK\nNONE\tF\tF\tF\tOFF\tF\tT\t3.0\tLOCK_ALL\tLOCK\nCONFIRMED\tT\tT\tT\tON\tF\tT\t3.0\tLOCK_ALL\tRELEASE\n",
+   "test_case_ids": [
+    "STC-F-127",
+    "STC-F-128",
+    "STC-F-129",
+    "STC-F-130",
+    "STC-F-131",
+    "STC-F-132",
+    "STC-F-133",
+    "STC-F-134",
+    "STC-F-135"
+   ]
+  }
+ ],
+ "findings": [
+  {
+   "basis_id": "SWR-004",
+   "type": "기대 동작 정의 필요",
+   "description": "해제 명령 거절 시 priority_reason/reason_code가 무엇인지 SWRS에 명시가 없다(SWR-019 표의 '해당 규칙 없음'을 적용하면 NONE/NO_CHANGE). 다른 규칙이 출력을 결정하면 그 규칙의 코드가 나온다.",
+   "proposal": "거절 시 이유 코드 정의(또는 NONE/NO_CHANGE 확인). 본 케이스는 표 규칙을 적용해 NONE/NO_CHANGE로 작성."
+  },
+  {
+   "basis_id": "SWR-004",
+   "type": "모호",
+   "description": "DRIVER_UNLOCK_REJECTED 알림이 상위 규칙(순위 1~4: 충돌 래치, 센서 고장, DEGRADED)이 출력을 결정하는 경우에도 나오는지 불명확. (d)를 문자 그대로 읽으면 DEGRADED에서도 나온다. 센서 고장·충돌 래치 중 해제 명령의 알림은 SWR-021·007에 규정이 없다.",
+   "proposal": "순위별로 알림 발생 여부 명시. 센서 고장·충돌 케이스에서는 notices를 판정하지 않았고, DEGRADED 케이스(STC-F 해제 조건 (d))만 문자 그대로 판정."
+  },
+  {
+   "basis_id": "SWR-006",
+   "type": "모호",
+   "description": "접근위험 TRUE인 쪽에 해제 명령이 올 때 UNLOCK_SUPPRESSED만 나오는지 DRIVER_UNLOCK_REJECTED도 함께 나오는지 불명확(SWR-004 (b)는 위험 TRUE 시 거절 알림, SWR-006은 억제 알림).",
+   "proposal": "두 알림의 관계 명시. 케이스는 UNLOCK_SUPPRESSED 포함 여부만 판정(side=all 케이스에서 DRIVER_UNLOCK_REJECTED는 관찰 기록)."
+  },
+  {
+   "basis_id": "SWR-006",
+   "type": "모호",
+   "description": "좌·우가 같은 순위(3)이면서 한쪽은 override(APPROACH_OVERRIDE), 다른 쪽은 LOCK(APPROACH_RISK)일 때 reason_code가 무엇인지 SWR-019(더 높은 순위 규칙의 것)로 정해지지 않는다(같은 순위, 다른 코드).",
+   "proposal": "동순위 코드 선택 규칙 명시. 해당 케이스는 reason_code를 판정에서 제외하고 관찰 기록."
+  },
+  {
+   "basis_id": "SWR-006",
+   "type": "누락",
+   "description": "(1) 위험 FALSE 시 억제 시각 t0의 초기화 여부가 SWRS에 없다(SWAD 3.4 상태도에만 있음). (2) 요청 시각이 t0보다 과거(음수 시간차)일 때 동작 미정의. (3) 억제 후 같은 쪽 잠금 명령이 t0에 미치는 영향 미정의. (4) DEGRADED 중 들어온 해제 요청이 t0를 갱신하는지 미정의.",
+   "proposal": "SWRS에 명시. (1)은 SWAD 기준 제안 케이스로 작성, (2)~(4)는 케이스 미작성."
+  },
+  {
+   "basis_id": "SWR-007",
+   "type": "모순",
+   "description": "SWR-007은 '이후 crash_status 값과 관계없이 래치 유지'라 하지만 SWR-019 표 순위 1은 '(IF-002 형식 유효)'를 활성 조건으로 둔다. 래치 중 IF-002가 무효(필드 누락)가 되면 래치가 유지되는지(RELEASE 유지) 아닌지 판정할 수 없다. 안전 요구라 영향이 크다.",
+   "proposal": "래치 중 IF-002 무효 시 동작 명시(래치 우선 권장). 기대 동작이 정해질 때까지 케이스 미작성."
+  },
+  {
+   "basis_id": "SWR-021",
+   "type": "모순",
+   "description": "SWR-005(ASIL B)는 접근위험 TRUE이면 LOCK이라 하지만 순위 2(센서 고장)는 접근위험(순위 3)보다 앞이라 센서 고장 중에는 접근위험 TRUE여도 LOCK하지 않고 직전 출력(RELEASE일 수 있음)을 유지한다. SWR-021 검증 기준('접근위험 변화에도 유지')이 이를 명시하지만 안전 관점에서 의문이다.",
+   "proposal": "OEM 확인(Q-02 연계). 케이스는 SWRS 문구대로 직전 출력 유지를 기대값으로 작성했으므로, OEM 답변이 바뀌면 STC-F의 '순위 2와 3' 케이스와 SWR-021 케이스(d)를 갱신."
+  },
+  {
+   "basis_id": "SWR-019",
+   "type": "기대 동작 정의 필요",
+   "description": "순위 표에 따르면 (1) 주행 중(차속 3.0 이상) 시동 OFF에서 좌·우 RELEASE, (2) DEGRADED(순위 4) 중 화재·시동 OFF 해제 규칙(순위 5, 6)이 적용되지 않아 화재 중에도 해제되지 않는다. SWRS 문구대로이나 안전·승객 보호 관점에서 의도 확인이 필요하다.",
+   "proposal": "OEM 확인(Q-02). 케이스는 표 순서대로 판정."
+  },
+  {
+   "basis_id": "SWR-013",
+   "type": "모호",
+   "description": "DEF-07 그룹 단위 무효화로 인해 안전 요구(SWR-005)의 접근위험 신호 중 한쪽 필드만 손실(누락/형식 오류)되어도 다른 쪽의 TRUE까지 무시된다(DEGRADED로 직전 출력 유지). 같은 방식으로 IF-007(화재 등)의 일부 필드 손실 시 유효한 fire_detected=true도 무시된다.",
+   "proposal": "의도 확인. 케이스는 DEF-07 문구대로 판정."
+  },
+  {
+   "basis_id": "SWR-013",
+   "type": "모호",
+   "description": "차속(vehicle_speed_kph)의 해상도·소수 자릿수 제약이 없어 3.0 km/h 직전 값(2.99 등)의 기대 동작이 정의되지 않는다. 또한 gear는 사용처가 없는데 무효이면 IF-001 전체가 무효가 되어 자동 잠금이 꺼진다(Q-11).",
+   "proposal": "차속 해상도 명시. 2.99 케이스는 '3.0 미만이면 미잠금'(수치 비교)을 기대값으로 작성."
+  },
+  {
+   "basis_id": "SWR-001",
+   "type": "모호",
+   "description": "DEF-09의 '같은 명령' 비교 범위(side, action, source 전체 비교인지)가 불명확하다. 예: source만 다른 같은 side/action 명령이 연속 스냅샷에 오는 경우 새 입력인지.",
+   "proposal": "비교 범위 명시. 케이스 미작성."
+  },
+  {
+   "basis_id": "SWR-002",
+   "type": "모호",
+   "description": "command가 객체가 아닌 값(문자열 등)이거나 빈 객체인 경우의 처리, null과 생략의 차이가 SWRS에 명시되지 않았다(SWAD 4.4는 null=명령 없음).",
+   "proposal": "명시. 제안 케이스(빈 객체, 비객체)는 필드 누락 규칙과 IF-004 무효 규칙에서 유추해 COMMAND_REJECTED로 작성."
+  },
+  {
+   "basis_id": "SWR-014",
+   "type": "모호",
+   "description": "스냅샷 수신 전(초기 상태) input_validity 값이 SWRS에 없다(SWAD 3.2는 모든 키 INVALID). 또한 notices 배열 순서가 정의되지 않아 집합 비교로 판정했다.",
+   "proposal": "초기 input_validity와 notices 순서 명시."
+  },
+  {
+   "basis_id": "SWR-013",
+   "type": "시험 불가",
+   "description": "시험 환경에서 서버 시계를 주입할 수 없다(실시간 단조 시계). 지연 200/201 ms 경계와 DEF-04 반올림 경계는 정확한 값을 입력으로 만들 수 없어 응답 timestamp_s로 지연을 사후 계산해 해당 구간 표본을 모으는 방식으로 시험한다(표본 부족 시 시험 불성립).",
+   "proposal": "시계 주입 가능한 단위 시험(SWE.4)으로 보완하거나 시험용 시계 설정 API 추가."
+  },
+  {
+   "basis_id": "SWR-016",
+   "type": "시험 불가",
+   "description": "'고정 시계로 1,000회 재생' 시험은 HTTP 인터페이스로 시계를 고정할 수 없어 수행할 수 없다. 대안으로 서버를 1,000회 재기동하며 시계 의존 필드(timestamp_s)를 제외한 해시를 비교한다. 시계 값 의존성 자체는 검증되지 않는다.",
+   "proposal": "시계 주입 가능한 단위 시험으로 보완."
+  },
+  {
+   "basis_id": "SWR-015",
+   "type": "시험 불가",
+   "description": "'응답 직렬화 실패 주입 시 HTTP 500' 검증은 시험 환경(HTTP 블랙박스)에서 직렬화 실패를 주입할 방법이 없어 케이스를 만들지 못했다. 200/400은 케이스로 검증.",
+   "proposal": "결함 주입 훅이 있는 단위·통합 시험으로 보완."
+  },
+  {
+   "basis_id": "SWR-023",
+   "type": "시험 불가",
+   "description": "순수 1회 평가 처리 시간은 HTTP 경유로 분리 측정할 수 없다. HTTP 왕복 시간(처리 시간 + 통신 + 서버 오버헤드)의 최댓값으로 상한을 측정한다. 왕복이 10 ms를 넘어도 처리 시간 위반이라 단정할 수 없다.",
+   "proposal": "코어 직접 호출 벤치마크로 보완."
+  },
+  {
+   "basis_id": "SWR-025",
+   "type": "모호",
+   "description": "Web 화면의 컨트롤 이름·배치·이력 표시 형식이 정의되지 않아 절차를 SWRS 3.6 표의 필드 이름 기준으로 서술했다. 화면 시험은 수동(브라우저)으로 수행한다.",
+   "proposal": "화면 요소 명세(필드 라벨) 추가."
+  },
+  {
+   "basis_id": "SWR-022",
+   "type": "모호",
+   "description": "tick 주기 '50 ms 이하' 자체는 외부에서 직접 관찰할 수 없다. 입력 중단 감지 시각(200 ms 초과 300 ms 이하)으로 간접 확인한다.",
+   "proposal": "tick 호출 계측용 로그나 카운터 노출."
+  },
+  {
+   "basis_id": "SWR-008",
+   "type": "모호",
+   "description": "충돌 래치(EMERGENCY) 중 PENDING이 들어올 때 CRASH_PENDING 알림이 나오는지 불명확하다.",
+   "proposal": "명시. 케이스 미작성."
+  },
+  {
+   "basis_id": "SWR-012",
+   "type": "누락",
+   "description": "실행 중 파일 생성 없음의 확인 범위(작업 디렉터리만인지, 임시 폴더·로그 포함인지)가 불명확하다.",
+   "proposal": "범위 명시. 케이스는 서버 작업 디렉터리 파일 목록 비교로 한정."
+  }
+ ],
+ "summary_notes": [
+  "페어와이즈 적용: (1) SWR-001 명령 조합(source 4 x side 3 x action 2, /o:2 -> 12행), (2) SWR-019 우선순위 조합(이진 파라미터 10개, /o:2 -> 9행). 모델·옵션·시드는 'PICT 모델' 시트. 도구: C:\\Users\\user\\.cache\\pict\\pict.exe.",
+  "SWR-001은 검증 기준이 24조합 전수이나 PICT 페어와이즈 12행으로 축약했다(source는 동일 처리이므로 3원 상호작용 결함 가능성은 낮다고 판단). 전수가 필요하면 PICT /o:3으로 재생성.",
+  "SWR-019는 PICT 9행에 더해 규칙 쌍 11건을 단독 케이스로 추가했다(PICT 행은 상위 규칙이 하위를 가려 쌍별 관찰이 약하기 때문).",
+  "그 밖의 항목은 독립 이산 파라미터가 3개 미만이거나 입력 순서(시퀀스)가 본질이라 페어와이즈 부적합. 시퀀스 케이스는 상태 전이·경계값·WoW 검증으로 도출.",
+  "시험 환경 한계: 서버 시계는 실시간 단조 시계이므로 지연 200/201 ms, 반올림 경계는 응답 timestamp_s를 이용한 사후 판정(표본 수집)으로 시험한다. override 창(10,000 ms)은 source_timestamp_s로 직접 지정하므로 결정적으로 시험한다.",
+  "수행 시간이 긴 케이스: override 창(약 11~14 s), 결정론(약 20분), 입력 중단 감시 반복. 자동화 스크립트로 수행 권장."
+ ]
+}
