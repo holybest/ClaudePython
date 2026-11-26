@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전자식 차일드락 시뮬레이터</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#5b6473; --line:#d9dde3;
+          --lock:#b42318; --release:#067647; --warn:#b54708; --accent:#2f5bd3; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171c; --card:#1d2128; --text:#e6e8eb; --muted:#9aa3b2; --line:#323844;
+            --lock:#f97066; --release:#47cd89; --warn:#fdb022; --accent:#7f9cf5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "Malgun Gothic", sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px; border-bottom:1px solid var(--line); }
+  h1 { font-size:1.2rem; margin:0; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:.85rem; }
+  main { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:16px; padding:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; }
+  h2 { font-size:1rem; margin:0 0 12px; }
+  label { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:4px 0; font-size:.9rem; }
+  input[type=number], select { width:9rem; padding:4px; background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:4px; }
+  button { margin-top:10px; padding:8px 12px; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; font-size:.9rem; }
+  .doors { display:flex; gap:12px; margin-bottom:12px; }
+  .door { flex:1; text-align:center; padding:12px; border-radius:8px; border:2px solid var(--line); font-weight:600; }
+  .door.LOCK { border-color:var(--lock); color:var(--lock); }
+  .door.RELEASE { border-color:var(--release); color:var(--release); }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 12px; margin:0; font-size:.9rem; }
+  dt { color:var(--muted); }
+  .bad { color:var(--warn); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  th, td { text-align:left; padding:4px; border-bottom:1px solid var(--line); }
+  .events { max-height:360px; overflow:auto; }
+  #error { color:var(--warn); font-size:.85rem; min-height:1.2em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>전자식 차일드락 시뮬레이터 (PC/SIL)</h1>
+  <p>입력을 설정하고 스냅샷을 보내면 SW 판정 결과를 확인할 수 있습니다. 상태는 0.5초마다 갱신됩니다.</p>
+</header>
+<main>
+  <section>
+    <h2>차량 입력</h2>
+    <label>차속 (km/h) <input id="vehicle_speed_kph" type="number" value="0" min="0" max="300" step="0.1"></label>
+    <label>기어 <select id="gear"><option>P</option><option>R</option><option>N</option><option>D</option></select></label>
+    <label>충돌 상태 <select id="crash_status"><option>NONE</option><option>PENDING</option><option>CONFIRMED</option></select></label>
+    <label>좌 후측방 접근위험 <input id="rear_left_approach_risk" type="checkbox"></label>
+    <label>우 후측방 접근위험 <input id="rear_right_approach_risk" type="checkbox"></label>
+    <label>화재 <input id="fire_detected" type="checkbox"></label>
+    <label>과온 <input id="overtemperature_detected" type="checkbox"></label>
+    <label>성인 탑승 <input id="adult_present" type="checkbox"></label>
+    <label>좌 ISOFIX <input id="isofix_left" type="checkbox"></label>
+    <label>우 ISOFIX <input id="isofix_right" type="checkbox"></label>
+    <label>시동 ON <input id="ignition_on" type="checkbox" checked></label>
+    <label>센서 고장 <input id="sensor_fault" type="checkbox"></label>
+    <button id="send">스냅샷 전송</button>
+  </section>
+  <section>
+    <h2>운전자 명령</h2>
+    <label>대상 <select id="cmd_side"><option>left</option><option>right</option><option>all</option></select></label>
+    <label>동작 <select id="cmd_action"><option>lock</option><option>unlock</option></select></label>
+    <label>경로 <select id="cmd_source"><option>physical_button</option><option>avn</option><option>voice</option><option>mobile_app</option></select></label>
+    <button id="send_cmd">명령 전송</button>
+    <p id="error"></p>
+  </section>
+  <section>
+    <h2>판정 결과</h2>
+    <div class="doors">
+      <div class="door" id="out_left">좌 —</div>
+      <div class="door" id="out_right">우 —</div>
+    </div>
+    <dl>
+      <dt>상태</dt><dd id="out_state">—</dd>
+      <dt>결정 규칙</dt><dd id="out_priority">—</dd>
+      <dt>이유 코드</dt><dd id="out_reason">—</dd>
+      <dt>알림</dt><dd id="out_notices">—</dd>
+      <dt>입력 유효성</dt><dd id="out_validity">—</dd>
+    </dl>
+  </section>
+  <section>
+    <h2>결정 이력 (최근 100건)</h2>
+    <div class="events">
+      <table><thead><tr><th>#</th><th>시각(s)</th><th>좌</th><th>우</th><th>상태</th><th>이유</th></tr></thead>
+      <tbody id="events"></tbody></table>
+    </div>
+  </section>
+</main>
+<script>
+  const BOOLS = ["rear_left_approach_risk", "rear_right_approach_risk", "fire_detected",
+    "overtemperature_detected", "adult_present", "isofix_left", "isofix_right", "ignition_on", "sensor_fault"];
+  const $ = (id) => document.getElementById(id);
+
+  function inputs() {
+    const body = { vehicle_speed_kph: Number($("vehicle_speed_kph").value),
+                   gear: $("gear").value, crash_status: $("crash_status").value };
+    for (const k of BOOLS) body[k] = $(k).checked;
+    return body;
+  }
+
+  async function post(body) {
+    const res = await fetch("/api/snapshot", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await res.json();
+    $("error").textContent = res.ok ? "" : `오류 ${res.status}: ${data.error}`;
+    if (res.ok) show(data);
+  }
+
+  function show(d) {
+    for (const [side, key] of [["좌", "lock_left"], ["우", "lock_right"]]) {
+      const el = $(key === "lock_left" ? "out_left" : "out_right");
+      el.textContent = `${side} ${d[key]}`;
+      el.className = `door ${d[key]}`;
+    }
+    $("out_state").textContent = d.state;
+    $("out_state").className = d.state === "NORMAL" || d.state === "OFF" ? "" : "bad";
+    $("out_priority").textContent = d.priority_reason;
+    $("out_reason").textContent = d.reason_code;
+    $("out_notices").textContent = d.notices.length ? d.notices.join(", ") : "—";
+    const bad = Object.entries(d.input_validity).filter(([, v]) => v !== "VALID");
+    $("out_validity").textContent = bad.length ? bad.map(([k, v]) => `${k}=${v}`).join(", ") : "모두 VALID";
+  }
+
+  async function refresh() {
+    try {
+      const status = await (await fetch("/api/status")).json();
+      show(status);
+      const events = await (await fetch("/api/events")).json();
+      $("events").replaceChildren(...events.slice().reverse().map((e) => {
+        const tr = document.createElement("tr");
+        for (const v of [e.event_id, e.timestamp_s.toFixed(2), e.lock_left, e.lock_right, e.state, e.reason_code]) {
+          const td = document.createElement("td"); td.textContent = v; tr.append(td);
+        }
+        return tr;
+      }));
+    } catch (err) {
+      $("error").textContent = "서버에 연결할 수 없습니다";
+    }
+  }
+
+  $("send").addEventListener("click", () => post(inputs()));
+  $("send_cmd").addEventListener("click", async () => {
+    const command = { side: $("cmd_side").value, action: $("cmd_action").value, source: $("cmd_source").value };
+    await post({ ...inputs(), command });
+    await post(inputs()); // 명령은 1회성 이벤트: 명령 없는 스냅샷을 이어서 보낸다 (SWDD 12장)
+  });
+  refresh();
+  setInterval(refresh, 500);
+</script>
+</body>
+</html>

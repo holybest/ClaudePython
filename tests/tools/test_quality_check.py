@@ -112,12 +112,16 @@ def test_function_pure_lines_reports_methods_and_nested_functions_by_qualified_n
     ]
 
 
-_GOOD = '"""모듈 설명"""\n# 주석\nX = 1\n'  # 비공백 3줄 중 주석 2줄 → 66.7%
+_GOOD = '"""!\n@brief 모듈 설명\n"""\nX = 1\n'  # 비공백 4줄 중 docstring 3줄 → 75%
 
 
 def _long_function(pure_lines: int) -> str:
     body = "".join(f"    v{i} = {i}\n" for i in range(pure_lines - 1))
-    return '"""!\n@brief 긴 함수\n"""\n# 주석\n\ndef big():\n' + body + "    return 0\n"
+    head = (
+        '"""!\n@brief 긴 함수\n"""\n\n'
+        'def big() -> int:\n    """!\n    @brief 길다\n    @return 0\n    """\n'
+    )
+    return head + body + "    return 0\n"
 
 
 def test_main_returns_zero_for_compliant_files_in_directory_tree(tmp_path, capsys):
@@ -128,16 +132,17 @@ def test_main_returns_zero_for_compliant_files_in_directory_tree(tmp_path, capsy
 
 
 def test_main_reports_comment_ratio_below_20_percent(tmp_path, capsys):
-    # 비공백 5줄 중 주석 1줄 → 20% 미만이 아니므로 통과, 6줄 중 1줄 → 16.7% 위반
+    # docstring 3줄 + 코드 12줄 → 3/15 = 20.0% 통과, 코드 13줄 → 3/16 = 18.75% 위반
+    doc = '"""!\n@brief 모듈\n"""\n'
     ok = tmp_path / "ok.py"
-    ok.write_text("# c\nA = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
+    ok.write_text(doc + "".join(f"A{i} = {i}\n" for i in range(12)), encoding="utf-8")
     bad = tmp_path / "bad.py"
-    bad.write_text("# c\nA = 1\nB = 2\nC = 3\nD = 4\nE = 5\n", encoding="utf-8")
+    bad.write_text(doc + "".join(f"A{i} = {i}\n" for i in range(13)), encoding="utf-8")
     assert quality_check.main([str(ok)]) == 0
     assert quality_check.main([str(bad)]) == 1
     out = capsys.readouterr().out
     assert "bad.py" in out
-    assert "주석률 16.7%" in out
+    assert "주석률 18.8%" in out
 
 
 def test_main_reports_function_over_50_pure_lines(tmp_path, capsys):

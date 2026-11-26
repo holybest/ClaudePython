@@ -3,3 +3,7 @@ pytest==9.2.0
 pytest-cov==7.1.0
 coverage==7.17.5
 ruff==0.17.6
+mypy==2.4.1
+mypy_extensions==1.2.0
+pathspec==1.1.1
+typing_extensions==4.16.0

@@ -30,9 +30,15 @@ pipeline {
                 bat '.ci-venv312\\Scripts\\python.exe -m ruff format --check .'
             }
         }
-        stage('주석률·함수 길이') {
+        stage('타입 검사 (mypy)') {
+            steps {
+                bat '.ci-venv312\\Scripts\\python.exe -m mypy'
+            }
+        }
+        stage('주석률·함수 길이·Doxygen·예외 표기') {
             steps {
                 bat '.ci-venv312\\Scripts\\python.exe -m tools.quality_check src tools'
+                bat '.ci-venv312\\Scripts\\python.exe -m tools.quality_check --markers-only tests'
             }
         }
         stage('단위 시험 Python 3.12') {

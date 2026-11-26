@@ -33,7 +33,9 @@ ruff check .                     # 정적 분석 (복잡도 C901 포함)
 ruff format --check .            # 포맷 검사 (수정은 ruff format .)
 pytest --cov --cov-branch --cov-report=term-missing --cov-fail-under=100
 pytest tests/unit/test_x.py::test_y   # 단일 테스트 실행
-python -m tools.quality_check src tools   # 주석률 20% 이상, 함수 순수 코드 50줄 이하
+mypy                             # 엄격 타입 검사 (Python 3.12 기준, 대상 src)
+python -m tools.quality_check src tools   # 주석률 20% 이상, 함수 순수 코드 50줄 이하, Doxygen 형식, 규칙 예외 표기
+python -m tools.quality_check --markers-only tests   # 시험 코드의 skip·xfail·noqa 등 규칙 예외 표기
 ```
 
 ## 개발 절차

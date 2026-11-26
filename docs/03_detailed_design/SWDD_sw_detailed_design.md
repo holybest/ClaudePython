@@ -3,7 +3,7 @@
 | 항목 | 내용 |
 |---|---|
 | 문서 ID | SWDD-ECL-001 |
-| 개정 | 0.2 (독립 검토 RV-05 결과 반영) |
+| 개정 | 0.3 (변경 요청 CR-01, CR-03 반영) |
 | 입력 | SWRS-ECL-001 (BL-SWR-1.0), SWAD-ECL-001 (BL-SWA-1.0) |
 | 목표 베이스라인 | BL-SWD-1.0 (게이트 G2) |
 | 상태 | **BL-SWD-1.0 확정** (2026-11-26 사용자 승인, RVW-ECL-003 RV-06) |
@@ -185,6 +185,8 @@ return decision
 
 ### 5.1 중간 결과 `Resolution` (frozen)
 
+`Resolution`은 SWU-03과 SWU-04가 함께 쓰므로 순환 import를 피하려고 `rules.py`에 정의하고 `arbitration.py`가 import한다(구현 시 확인).
+
 | 필드 | 설명 |
 |---|---|
 | `outputs: SidePair[LockOutput \| None]` | 결정된 쪽만 값, 미결정은 `None` |
@@ -218,7 +220,7 @@ return decision, next_state
 
 | 함수 | 처리 | 근거 |
 |---|---|---|
-| `update_guards(context, doors) -> SidePair[DoorGuard]` | `v = context.validity`. 쪽마다: `v.if_003 == VALID`이고 해당 쪽 위험 FALSE → `IDLE_GUARD`. 아니고 `v.safety_abnormal()` 또는 (`v.if_009 == VALID`이고 `sensor_fault`) → `override_active = False`(억제 시각 유지). 그 외 그대로 | SWR-006, SWAD 3.4 |
+| `update_guards(context, doors) -> SidePair[DoorGuard]` | `v = context.validity`. 쪽마다: `v.if_003 == VALID`이고 해당 쪽 위험 FALSE → `IDLE_GUARD`. 아니고 `v.safety_abnormal()` 또는 (`v.if_009 == VALID`이고 `sensor_fault`) 또는 `_lock_requested(context, side)`(새 입력 잠금 명령이 그 쪽 포함, CR-03) → `override_active = False`(억제 시각 유지). 그 외 그대로 | SWR-006, SWAD 3.4 |
 | `fill_undecided(decided, previous) -> SidePair[LockOutput]` | 쪽마다 `decided`가 `None`이면 `previous` 값 | SWR-013, 021 |
 | `ordered_notices(notices, is_tick) -> tuple[Notice, ...]` | `is_tick`이면 `COMMAND_NOTICES` 제거. `Notice` 정의 순서로 정렬 | SWAD 3.2 |
 | `compute_state(context, res) -> State` | `v = context.validity`. `res.crash_latched` → `EMERGENCY`; `v.if_009 == VALID`이고 `sensor_fault` → `FAULT`; `v.safety_abnormal()` → `DEGRADED`; `res.doors` 중 `override_active` → `OVERRIDE`; `v.if_009 == VALID`이고 `not ignition_on` → `OFF`; 그 외 `NORMAL` | DEF-10 |
@@ -302,7 +304,9 @@ return res
 - (c) `v.if_008 == VALID`이고 해당 쪽 ISOFIX FALSE
 - (d) `res.is_open(side)`
 
-잠금 명령이 상위 규칙으로 결정된 쪽에 들어오면 알림 없이 적용하지 않는다. override 중인 쪽의 잠금 명령도 같다(변경 요청 CR-03 참고).
+잠금 명령이 상위 규칙으로 결정된 쪽에 들어오면 알림 없이 적용하지 않는다. override 중인 쪽의 잠금 명령은 `update_guards`가 override를 먼저 끝내므로 규칙 3이 그 쪽을 `LOCK`으로 결정한다(CR-03).
+
+`_lock_requested(context, side)`: `context.command_is_new`이고 명령이 `LOCK`이며 그 쪽을 포함하면 참(`_unlock_requested`와 대칭).
 
 ### 6.3 판정 결과 예 (단위 시험 기대값의 기준)
 모든 행은 시동 ON, 모든 입력 유효·신선, 충돌 NONE이 기본이며 표에 적은 것만 다르다.
@@ -331,11 +335,11 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 |---|---|---|
 | `MonotonicClock` | 생성 시 `self._origin = time.monotonic()`. `__call__() -> float`: `time.monotonic() - self._origin` | SWAD 4.2, 6.1 |
 | `SafetyRuntime.__init__(controller, clock, on_decision=None, tick_period_s=0.05)` | `threading.Lock`, `threading.Event`(정지), 스레드 핸들 `None`, `tick_errors = 0`, `callback_errors = 0` | – |
-| `evaluate_snapshot(raw) -> Decision` | `with self._lock: now = clock(); d = controller.evaluate_snapshot(raw, now); self._notify(d)`; `return d`. 컨트롤러 예외는 호출자에게 전달(코어 상태 변경 없음) | SWAD 3.1 |
-| `tick() -> Decision` | 위와 같고 `evaluate_tick(now)` 호출 | SWR-022 |
+| `evaluate_snapshot(raw) -> Decision` | `with self._lock: now = clock(); d = controller.evaluate_snapshot(raw, now); self._notify(d, False)`; `return d`. 컨트롤러 예외는 호출자에게 전달(코어 상태 변경 없음) | SWAD 3.1 |
+| `tick() -> Decision` | 위와 같고 `evaluate_tick(now)` 호출, `self._notify(d, True)` | SWR-022 |
 | `now() -> float` | `clock()` | SWAD 4.4 |
 | `last_decision() -> Decision` | `with self._lock: return controller.last_decision` | – |
-| `_notify(d)` | `on_decision`이 있으면 호출. 예외는 잡아서 `callback_errors += 1` | SWAD 6.1 |
+| `_notify(d, is_tick)` | `on_decision`이 있으면 `on_decision(d, is_tick)` 호출. 예외는 잡아서 `callback_errors += 1` | SWAD 6.1, 4.2 |
 | `start()` | 스레드가 살아 있으면 무시. 아니면 정지 이벤트 `clear()` 후 데몬 스레드로 `_tick_loop` 시작 | 검토 D-10 |
 | `_tick_loop()` | `while not stop.wait(period): try: tick() except Exception: tick_errors += 1` | SWAD 6.1, 6.2 |
 | `stop()` | 정지 이벤트 설정, 스레드가 있으면 `join(timeout=1.0)` | – |
@@ -345,11 +349,12 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | 요소 | 처리 | 근거 |
 |---|---|---|
 | `Event` (frozen) | `event_id: int`, `timestamp_s: float`, `lock_left`, `lock_right`, `state`, `priority_reason`, `reason_code`, `notices` | SWR-011 |
-| `EventLog.__init__(capacity=100)` | `collections.deque(maxlen=capacity)`, `_next_id = 1`, `threading.Lock` | SWR-012 |
-| `append(decision) -> Event` | 잠금 아래에서 `Event` 생성(허용 필드만 복사), `_next_id += 1`, deque 추가(가득 차면 가장 오래된 것 자동 삭제) | SWR-010, 012 |
+| `EventLog.__init__(capacity=100)` | `collections.deque(maxlen=capacity)`, `_next_id = 1`, `_last_key = None`, `threading.Lock` | SWR-012 |
+| `_key(decision)` | `(lock_left, lock_right, state, reason_code)` | SWR-010 |
+| `record(decision, is_tick) -> Event \| None` | 잠금 아래에서: `key = _key(decision)`; `changed = key != _last_key`; `_last_key = key`. `is_tick`이고 `not changed`이면 `None` 반환(기록 안 함). 그 외 `Event` 생성(허용 필드만 복사), `_next_id += 1`, deque 추가(가득 차면 가장 오래된 것 자동 삭제) | SWR-010(CR-01), 012 |
 | `events() -> tuple[Event, ...]` | 잠금 아래에서 오래된 순 튜플 생성 | SWR-012, 검토 D-10 |
 
-파일·DB에 쓰지 않는다. CR-01이 승인되면 기록 조건 함수를 추가한다(현재는 모두 기록).
+파일·DB에 쓰지 않는다.
 
 ## 9. SWU-08 응용 조립 (`app/service.py`)
 
@@ -361,7 +366,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | `events() -> tuple[Event, ...]` | `log.events()` |
 | `now() -> float` | `runtime.now()` |
 | `start()` / `stop()` | `runtime.start()` / `runtime.stop()` (Web이 런타임을 직접 호출하지 않도록, DEP-05) |
-| `create_service(clock=None) -> ChildLockService` | `EventLog()`, `ChildLockController()`, `SafetyRuntime(controller, clock or MonotonicClock(), on_decision=log.append)` 생성·연결 |
+| `create_service(clock=None) -> ChildLockService` | `EventLog()`, `ChildLockController()`, `SafetyRuntime(controller, clock or MonotonicClock(), on_decision=log.record)` 생성·연결 |
 
 ## 10. SWU-09 Web API (`web/server.py`)
 
@@ -375,6 +380,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | `_parse_float(text)` | `float(text)`가 유한하지 않으면(`1e400` 등) `RequestError`, 아니면 그 값 (`json.loads(parse_float=...)`) | 검토 D-04 |
 | `parse_snapshot(body: bytes, now_s: float) -> dict[str, object]` | UTF-8 디코딩 실패·JSON 오류 → `RequestError`. 최상위가 dict가 아님 → `RequestError`. `SNAPSHOT_KEYS` 밖의 키 → `RequestError`. `command`가 dict이면 `COMMAND_KEYS` 밖의 키 → `RequestError`. `source_timestamp_s`가 없으면 `now_s`로 채움 | SWR-015, 026 |
 | `MAX_BODY_BYTES = 65536` | `Content-Length`가 없거나, 정수가 아니거나, 이를 넘으면 `RequestError` | – |
+| `DRAIN_LIMIT_BYTES = 1048576` | 모든 POST는 응답 전에 본문을 먼저 읽는다(`_take_body`). 64 KiB를 넘으면 1 MiB까지 읽고 버린 뒤 400. 읽지 않은 본문이 남으면 Windows에서 연결이 강제로 끊겨 클라이언트가 응답을 못 받는 결함이 구현 중 발견되어 추가(재현 시험: `test_error_responses_are_delivered_reliably_even_with_unread_bodies`) | 구현 시 발견 |
 
 큰 정수는 JSON 파싱을 통과하지만 코어의 `_as_float`가 무효로 판정한다(예외 없음).
 
@@ -424,7 +430,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | SWR-007 | SWU-02 `_validate_crash`, SWU-04 `rule_crash`, SWU-03 `compute_state`, SWU-05 `reset_on_ignition_off` |
 | SWR-008 | SWU-04 `rule_crash` |
 | SWR-009 | SWU-04 `_risk_side`, `rule_isofix`, `rule_driver_command` |
-| SWR-010 | SWU-07 `EventLog.append`, SWU-06 `_notify` |
+| SWR-010 | SWU-07 `EventLog.record`, SWU-06 `_notify` |
 | SWR-011 | SWU-07 `Event`, SWU-09 `event_to_dict` |
 | SWR-012 | SWU-07 `EventLog` |
 | SWR-013 | SWU-02 `validate`·그룹 함수·`_as_float`, SWU-01 `InputValidity.safety_abnormal`, SWU-05 `is_fresh`, `build_context`, SWU-04 `rule_degraded`, SWU-03 `compute_state` |
@@ -454,8 +460,11 @@ SWR 26건 모두 하나 이상의 함수로 추적된다(26/26).
 
 | ID | 대상 | 내용 | 상태 |
 |---|---|---|---|
-| CR-02 | SWAD | 1.4 표의 구체화(SWC-03 모듈 분할, `EvalContext` 필드)를 SWAD 본문에 반영 | 사용자 결정 대기 (구현은 SWDD 기준) |
-| CR-03 | SWRS SWR-006 | override 중인 쪽에 운전자 잠금 명령이 들어오면 현재 정의상 무시된다(override는 위험 FALSE 등으로만 종료). 제안: 잠금 명령도 override 종료 조건에 추가해 그 쪽을 `LOCK`으로 한다(안전 방향) | 사용자 결정 대기 (결정 전까지 현재 정의대로 구현) |
+| CR-01 | SWRS SWR-010 | tick 결과는 변화가 있을 때만 기록 | **반영** (SWRS 0.3, 8장 `record`) |
+| CR-02 | SWAD | 1.4 표의 구체화를 SWAD 본문에 반영 | **반영** (SWAD 0.3) |
+| CR-03 | SWRS SWR-006 | override 중 잠금 명령으로 override 종료, 그 쪽 `LOCK` | **반영** (SWRS 0.3, 5.2 `update_guards`) |
+
+2026-11-26 사용자 지시("이후 단계는 승인 없이 끝까지 진행")에 따라 권장안대로 반영했다.
 
 ## 16. 개정 이력
 
@@ -463,3 +472,4 @@ SWR 26건 모두 하나 이상의 함수로 추적된다(26/26).
 |---|---|---|
 | 0.1 | 2026-11-26 | 최초 작성 |
 | 0.2 | 2026-11-26 | 독립 검토 RV-05 반영: 시간 차이 반올림(`diff_ms`), override 창 하한과 지연 시각 미기록, 명령 재입력 전제와 화면 동작, 큰 정수·무한대 처리, 서비스 `start/stop`, override 이유 의사코드, 모호성 해소, 시동 OFF 초기화 조건, SWAD 구체화 CR-02, 런타임 재시작·이력 잠금, 추적표 보완, CR-03 |
+| 0.3 | 2026-11-26 | CR-01(이력 `record` 기록 조건, 콜백 `is_tick`), CR-03(`update_guards` 잠금 명령 종료) 반영 |
