@@ -1,0 +1,15 @@
+# 가상환경
+.venv/
+.venv-*/
+
+# Python 캐시·도구 산출물
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# OEM 입력 문서: 교육용 저작물(과정 밖 배포·공개 금지)이므로 공개 저장소에 올리지 않는다
+OEM/

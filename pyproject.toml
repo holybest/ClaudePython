@@ -1,0 +1,37 @@
+[project]
+name = "child-lock"
+version = "0.1.0"
+description = "전자식 차일드락 제어 SW (PC/SIL 참조 구현)"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+branch = true
+source = ["src", "tools"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests", "tools"]
+# 스킬·에이전트 보조 스크립트는 제품 코드가 아니므로 검사 대상에서 제외
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import 정렬, N: 명명 규칙, B: 버그 위험,
+# UP: 최신 문법, SIM: 단순화, C90: 순환 복잡도
+select = ["E", "W", "F", "I", "N", "B", "UP", "SIM", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
