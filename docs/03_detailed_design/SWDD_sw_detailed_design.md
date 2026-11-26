@@ -185,6 +185,8 @@ return decision
 
 ### 5.1 중간 결과 `Resolution` (frozen)
 
+`Resolution`은 SWU-03과 SWU-04가 함께 쓰므로 순환 import를 피하려고 `rules.py`에 정의하고 `arbitration.py`가 import한다(구현 시 확인).
+
 | 필드 | 설명 |
 |---|---|
 | `outputs: SidePair[LockOutput \| None]` | 결정된 쪽만 값, 미결정은 `None` |
