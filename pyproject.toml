@@ -30,8 +30,15 @@ extend-exclude = [".claude"]
 
 [tool.ruff.lint]
 # E/W: pycodestyle, F: pyflakes, I: import 정렬, N: 명명 규칙, B: 버그 위험,
-# UP: 최신 문법, SIM: 단순화, C90: 순환 복잡도
-select = ["E", "W", "F", "I", "N", "B", "UP", "SIM", "C90"]
+# UP: 최신 문법, SIM: 단순화, C90: 순환 복잡도, SLF: 비공개 속성 접근 금지(SWAD DEP-06)
+select = ["E", "W", "F", "I", "N", "B", "UP", "SIM", "C90", "SLF"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
+
+[tool.mypy]
+# 정적 분석 계획 SA-06: 엄격 타입 검사, Python 3.12 기준(3.13+ 전용 API 검출)
+strict = true
+python_version = "3.12"
+files = ["src"]
+mypy_path = "src"
