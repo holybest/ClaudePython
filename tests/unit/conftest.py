@@ -5,6 +5,7 @@
 from collections.abc import Callable
 
 import pytest
+
 from tests.unit.helpers import Harness, cmd
 
 

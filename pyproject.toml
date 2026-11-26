@@ -33,6 +33,9 @@ extend-exclude = [".claude"]
 # UP: 최신 문법, SIM: 단순화, C90: 순환 복잡도, SLF: 비공개 속성 접근 금지(SWAD DEP-06)
 select = ["E", "W", "F", "I", "N", "B", "UP", "SIM", "C90", "SLF"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["child_lock", "tools", "tests"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 

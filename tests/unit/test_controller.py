@@ -3,10 +3,10 @@
 """
 
 import pytest
-from tests.unit.helpers import DROP, cmd, summary
 
 from child_lock.core import controller as ctl_mod
 from child_lock.core import model as m
+from tests.unit.helpers import DROP, cmd, summary
 
 R, L = "RELEASE", "LOCK"
 
