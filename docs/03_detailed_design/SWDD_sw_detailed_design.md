@@ -341,7 +341,7 @@ Web 화면은 명령을 보낸 직후 명령 없는 스냅샷을 1회 더 보낸
 | `last_decision() -> Decision` | `with self._lock: return controller.last_decision` | – |
 | `_notify(d, is_tick)` | `on_decision`이 있으면 `on_decision(d, is_tick)` 호출. 예외는 잡아서 `callback_errors += 1` | SWAD 6.1, 4.2 |
 | `start()` | 스레드가 살아 있으면 무시. 아니면 정지 이벤트 `clear()` 후 데몬 스레드로 `_tick_loop` 시작 | 검토 D-10 |
-| `_tick_loop()` | `while not stop.wait(period): try: tick() except Exception: tick_errors += 1` | SWAD 6.1, 6.2 |
+| `_tick_loop()` | 다음 예정 시각까지 남은 시간만 대기(`stop.wait(max(0, next_at - now))`) → `try: tick() except Exception: tick_errors += 1` → `next_at = max(next_at + period, now)`. 고정 대기는 Windows 대기 분해능 때문에 실제 주기가 62.5 ms가 되는 결함이 통합 시험에서 발견되어 변경(ITR-ECL-001 I-01) | SWAD 6.1, 6.2, SWR-022 |
 | `stop()` | 정지 이벤트 설정, 스레드가 있으면 `join(timeout=1.0)` | – |
 
 ## 8. SWU-07 결정 이력 (`app/event_log.py`)

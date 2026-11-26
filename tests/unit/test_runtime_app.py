@@ -121,6 +121,17 @@ def test_tick_thread_runs_periodically_and_can_restart():
     assert all(is_tick for _, is_tick in rec.calls)
 
 
+def test_tick_thread_keeps_average_period_of_50ms_despite_timer_granularity():
+    # Windows 대기 분해능(약 15.6 ms) 때문에 50 ms 대기가 62.5 ms로 늘어나도
+    # 평균 주기는 50 ms여야 한다 (SWR-022)
+    rec = Recorder()
+    rt = SafetyRuntime(ChildLockController(), MonotonicClock(), rec, tick_period_s=0.05)
+    rt.start()
+    time.sleep(1.02)
+    rt.stop()
+    assert 19 <= len(rec.calls) <= 22
+
+
 def test_tick_thread_survives_exceptions():
     rt = SafetyRuntime(ExplodingController(), FakeClock(), tick_period_s=0.01)
     rt.start()
