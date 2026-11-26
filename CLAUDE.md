@@ -8,18 +8,32 @@ ClaudePython — AI를 이용한 파이썬 코드 작성용 저장소 (README �
 
 ## 개발환경
 
-- 개발 언어는 Python 최신 안정 버전을 사용한다. 현재 기준은 Python 3.14이다.
+- 개발 언어는 Python이다. OEM이 실행 환경을 Python 3.12로 지정했으므로 **3.12 호환**으로 작성하고(3.13 이상 전용 기능 금지), 시험은 3.12와 최신 버전(현재 3.14)에서 모두 실행한다.
+  - 가상환경: `.venv`(Python 3.12, 기본), `.venv-py314`(Python 3.14, 호환성 확인용). 둘 다 pytest, pytest-cov, Ruff가 설치되어 있다.
 - 단위 테스트 프레임워크는 pytest를 사용하고, 커버리지는 pytest-cov로 측정한다.
 - 정적 분석과 코드 포맷은 Ruff를 사용한다. 순환 복잡도는 Ruff의 `C901` 규칙(`max-complexity = 10`)으로 검사한다.
-- 도구 설정은 `pyproject.toml`에 둔다. 아직 없으므로 첫 코드 작업 때 만든다.
+- 주석률과 함수 순수 코드 줄 수는 `tools/quality_check.py`로 검사한다.
+- 도구 설정은 `pyproject.toml`에 있다. Web 기능은 표준 라이브러리만 쓰며 런타임 외부 패키지는 두지 않는다.
+- 프로젝트 결정 사항은 `docs/00_project/project_decisions.md`에 기록한다.
+
+### 구조
+
+- `src/child_lock/`: 제품 코드(전자식 차일드락 제어 SW)
+- `tests/unit`, `tests/integration`: 단위·통합 시험 / `tests/tools`: 도구 시험
+- `tools/`: 개발 보조 도구(품질 검사 등)
+- `docs/`: 단계별 산출물(문서 내용은 한글)
+- `OEM/`: OEM 입력 문서. 교육용 저작물(과정 밖 공개 금지)이라 git에 올리지 않는다(`.gitignore`).
 
 ### 기본 명령
+
+Windows에서는 `.venv/Scripts/python.exe`(3.12), `.venv-py314/Scripts/python.exe`(3.14)로 실행한다.
 
 ```bash
 ruff check .                     # 정적 분석 (복잡도 C901 포함)
 ruff format --check .            # 포맷 검사 (수정은 ruff format .)
 pytest --cov --cov-branch --cov-report=term-missing --cov-fail-under=100
-pytest tests/test_x.py::test_y   # 단일 테스트 실행
+pytest tests/unit/test_x.py::test_y   # 단일 테스트 실행
+python -m tools.quality_check src tools   # 주석률 20% 이상, 함수 순수 코드 50줄 이하
 ```
 
 ## 개발 절차
