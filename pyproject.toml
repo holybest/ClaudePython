@@ -11,7 +11,8 @@ dev = ["pytest", "pytest-cov", "ruff"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
-addopts = "--strict-markers"
+addopts = "--strict-markers -m \"not system\""
+markers = ["system: SW 시스템 시험(SWE.6). 시뮬레이터를 별도 프로세스로 실행하므로 기본 실행에서 제외, -m system으로 실행"]
 
 [tool.coverage.run]
 branch = true
